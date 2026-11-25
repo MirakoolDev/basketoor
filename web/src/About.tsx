@@ -174,7 +174,7 @@ export function About() {
                 <KV k="Max price age" v={every(d.data.stale).replace(/^every /i, "")} note="Older prices (e.g. a closed market) skip that asset." />
                 <KV k="Buy frequency" v={`${every(d.data.minI).replace(/^every /i, "")} to ${every(d.data.maxI).replace(/^every /i, "")}`} />
                 <KV k="Minimum per asset per buy" v={money(Number(d.data.minLeg) / 1e6)} />
-                <KV k="Auto-close after" v={`${d.data.maxSkip} fully skipped runs`} note="Refunds the basket if it can't buy for that long." />
+                <KV k="Auto-close after" v={`${d.data.maxSkip} failed tries in a row`} note="A run that buys nothing is retried an hour later. After this many in a row the basket is refunded." />
                 <KV k="New baskets" v={d.data.paused ? "Paused" : "Open"} note="Pausing never blocks existing baskets or withdrawals." />
               </Table>
             )}

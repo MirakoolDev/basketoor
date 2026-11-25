@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -11,21 +11,30 @@ import {ISwapAdapter} from "../interfaces/ISwapAdapter.sol";
 interface ICLPool {
     function token0() external view returns (address);
     function token1() external view returns (address);
+    function tickSpacing() external view returns (int24);
     function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata data)
         external
         returns (int256 amount0, int256 amount1);
+}
+
+/// @dev The Slipstream pool factory: only pools it created are accepted.
+interface ICLFactory {
+    function getPool(address tokenA, address tokenB, int24 tickSpacing) external view returns (address);
 }
 
 /// @notice Mainnet venue: swaps directly against an owner-chosen Aerodrome concentrated-liquidity pool per
 /// pair (where Coinbase's tokenized stocks are deepest), with no router in between.
 /// The adapter checks `minOut` itself, so a thin pool makes this leg's swap revert (Basketoor skips the
 /// leg and keeps its USDC) rather than under-delivering. Basketoor still re-checks what arrives.
-contract AerodromeCLAdapter is ISwapAdapter, Ownable {
+/// Trust: the owner picks the pools, but only among pools the Slipstream factory created for the pair; use the
+/// same key (and two-step handover) as Basketoor's owner.
+contract AerodromeCLAdapter is ISwapAdapter, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
     uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287233237081398096342;
 
+    ICLFactory public immutable factory;
     mapping(address tokenIn => mapping(address tokenOut => ICLPool)) public pools;
 
     /// @dev The pool we're mid-swap with; only it may call the callback.
@@ -39,13 +48,16 @@ contract AerodromeCLAdapter is ISwapAdapter, Ownable {
     error Slippage(uint256 out, uint256 minOut);
     error UnexpectedCallback();
 
-    constructor(address owner_) Ownable(owner_) {}
+    constructor(ICLFactory factory_, address owner_) Ownable(owner_) {
+        factory = factory_;
+    }
 
     /// @notice Routes tokenIn -> tokenOut through `pool` (both directions are set). Pass address(0) to remove.
     function setPool(address tokenIn, address tokenOut, ICLPool pool) external onlyOwner {
         if (address(pool) != address(0)) {
             (address t0, address t1) = (pool.token0(), pool.token1());
             if (!((t0 == tokenIn && t1 == tokenOut) || (t0 == tokenOut && t1 == tokenIn))) revert WrongPool();
+            if (factory.getPool(t0, t1, pool.tickSpacing()) != address(pool)) revert WrongPool();
         }
         pools[tokenIn][tokenOut] = pool;
         pools[tokenOut][tokenIn] = pool;

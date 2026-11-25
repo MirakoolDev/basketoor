@@ -24,6 +24,11 @@ import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 ///
 /// Fees: per buy, the larger of `feeBps` of what was actually spent and `minFee`. Nothing is charged for a
 /// buy where every leg was skipped. On close, Basketoor keeps `yieldFeeBps` of the yield the plan earned.
+/// All three are fixed per plan when it is created.
+///
+/// A run where nothing could be bought (stale prices, savings vault not paying out) is retried after
+/// `RETRY_DELAY` instead of waiting a whole interval. Payouts that the recipient can't receive (e.g. a USDC
+/// blocklisted address) are kept for them to `claim` instead of blocking the keeper or anyone's exit.
 contract Basketoor is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -32,8 +37,13 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     uint256 public constant MAX_FEE_BPS = 200; // 2%
     uint256 public constant MAX_YIELD_FEE_BPS = 3_000; // 30% of yield
     uint256 public constant MAX_SLIPPAGE_BPS = 1_000; // 10%
-    /// @notice Gas a keeper should budget per plan (5 legs, savings on). executeDue stops early below this.
-    uint256 public constant GAS_PER_RUN = 900_000;
+    /// @notice Gas budget per plan run: base + per active leg + savings vault. See `gasFor`. Measured on Base
+    /// mainnet against Aerodrome Slipstream pools: ~520k for one leg, ~300k for each extra one.
+    uint256 public constant GAS_BASE = 250_000;
+    uint256 public constant GAS_PER_LEG = 450_000;
+    uint256 public constant GAS_VAULT = 300_000;
+    /// @notice A run that bought nothing is retried this long after (or after one interval, if shorter).
+    uint64 public constant RETRY_DELAY = 1 hours;
 
     // ---------------------------------------------------------------- types
 
@@ -56,12 +66,14 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint64 interval;
         uint64 nextRun;
         uint64 createdAt;
+        uint64 lastRun; // time of the last buy; 0 before the first
         uint32 buysDone; // buys where at least one leg filled
         uint32 maxBuys;
-        uint32 skippedRuns; // runs where every leg was skipped
+        uint32 skippedRuns; // runs in a row where nothing was bought; reset by a buy
         bool active;
         bool savings; // budget sits in `vault`
         uint16 feeBps; // snapshot at creation
+        uint16 yieldFeeBps; // snapshot at creation
         uint64 minFee; // snapshot at creation
         IERC4626 vault;
         uint256 shares; // vault shares held for this plan
@@ -88,7 +100,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     uint64 public minInterval = 1 hours;
     uint64 public maxInterval = 30 days;
     uint256 public minLegAmount = 1e6; // $1
-    uint32 public maxSkippedRuns = 60;
+    uint32 public maxSkippedRuns = 168; // a week of hourly retries
     bool public createPaused;
 
     mapping(address => Asset) public assets;
@@ -103,6 +115,10 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     uint256[] internal _active;
     mapping(uint256 => uint256) internal _activePos; // index + 1
 
+    /// @notice USDC owed to an address whose payout transfer failed. Withdrawn with `claim`.
+    mapping(address => uint256) public owed;
+    uint256 public totalOwed;
+
     // ---------------------------------------------------------------- events
 
     event PlanCreated(
@@ -114,6 +130,9 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint256 indexed id, uint32 indexed buyIndex, address indexed token, uint256 usdcIn, uint256 amountOut, uint256 price
     );
     event LegSkipped(uint256 indexed id, address indexed token, uint8 reason); // 1 price unavailable/stale, 2 swap failed
+    event VaultUnavailable(uint256 indexed id); // the savings vault couldn't be read or pay out; run retried later
+    event PaymentDeferred(address indexed to, uint256 amount);
+    event Claimed(address indexed from, address indexed to, uint256 amount);
     event Executed(uint256 indexed id, uint32 buyIndex, uint256 spent, uint256 fee, uint64 nextRun);
 
     event AssetSet(address indexed token, address feed, bool enabled);
@@ -133,6 +152,10 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     error CreatePaused();
     error BadConfig();
     error UnderDelivered(address token);
+    error InsufficientGas(uint256 needed);
+    error DepositTooHigh(uint256 required);
+    error BadVaultDeposit();
+    error NothingOwed();
 
     modifier onlyKeeper() {
         if (!keepers[msg.sender]) revert NotKeeper();
@@ -140,6 +163,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     }
 
     constructor(IERC20 usdc_, ISwapAdapter swapAdapter_, address treasury_, address owner_) Ownable(owner_) {
+        if (address(swapAdapter_).code.length == 0 || treasury_ == address(0)) revert BadConfig();
         usdc = usdc_;
         swapAdapter = swapAdapter_;
         treasury = treasury_;
@@ -147,15 +171,16 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     // ================================================================ user
 
-    /// @notice Open a plan. Pulls `quoteDeposit(sum(amounts), maxBuys)` USDC from the caller.
-    /// The first buy is due immediately.
+    /// @notice Open a plan. Pulls `quoteDeposit(sum(amounts), maxBuys)` USDC from the caller, and reverts if
+    /// that is more than `maxDeposit` (a fee change landing first). The first buy is due immediately.
     function createPlan(
         string calldata name,
         address[] calldata tokens,
         uint256[] calldata amounts,
         uint64 interval,
         uint32 maxBuys,
-        bool savings
+        bool savings,
+        uint256 maxDeposit
     ) external nonReentrant returns (uint256 id) {
         if (createPaused) revert CreatePaused();
         if (interval < minInterval || interval > maxInterval) revert BadInterval();
@@ -172,6 +197,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         p.active = true;
         p.feeBps = feeBps;
         p.minFee = minFee;
+        p.yieldFeeBps = yieldFeeBps;
         if (savings && address(savingsVault) != address(0)) {
             p.savings = true;
             p.vault = savingsVault;
@@ -180,8 +206,9 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         _setLegs(id, tokens, amounts, true);
 
         uint256 deposit = _required(_perBuy(id), p.feeBps, p.minFee, maxBuys);
+        if (deposit > maxDeposit) revert DepositTooHigh(deposit);
         usdc.safeTransferFrom(msg.sender, address(this), deposit);
-        _put(p, deposit);
+        _put(p, deposit, true);
         p.principal = deposit;
 
         _plansOf[msg.sender].push(id);
@@ -193,14 +220,17 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     /// @notice Change amounts, add stocks, change the frequency or the number of buys.
     /// `tokens` must list the plan's current stocks first, in order (amount 0 pauses one), then any new ones.
-    /// The budget is resized to fund exactly the remaining buys: the difference is pulled or refunded.
+    /// The budget is resized to fund exactly the remaining buys (at the plan's own fees): the difference is
+    /// pulled (at most `maxPull`, and not while new plans are paused) or refunded. A new frequency applies from
+    /// the last buy: next buy = last buy + new interval, or now if that has passed.
     function updatePlan(
         uint256 id,
         string calldata name,
         address[] calldata tokens,
         uint256[] calldata amounts,
         uint64 interval,
-        uint32 maxBuys
+        uint32 maxBuys,
+        uint256 maxPull
     ) external nonReentrant {
         Plan storage p = _ownedActive(id);
         if (interval < minInterval || interval > maxInterval) revert BadInterval();
@@ -208,6 +238,9 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
         _setLegs(id, tokens, amounts, false);
         p.name = name;
+        if (interval != p.interval && p.lastRun != 0) {
+            p.nextRun = uint64(Math.max(p.lastRun + interval, block.timestamp));
+        }
         p.interval = interval;
         p.maxBuys = maxBuys;
 
@@ -215,15 +248,16 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint256 pulled;
         uint256 refunded;
         if (p.principal < required) {
+            if (createPaused) revert CreatePaused();
             pulled = required - p.principal;
+            if (pulled > maxPull) revert DepositTooHigh(pulled);
             usdc.safeTransferFrom(msg.sender, address(this), pulled);
-            _put(p, pulled);
+            _put(p, pulled, true);
             p.principal += pulled;
         } else if (p.principal > required) {
-            refunded = Math.min(p.principal - required, _value(p));
-            _take(p, refunded);
+            refunded = _take(p, p.principal - required);
             p.principal -= refunded;
-            usdc.safeTransfer(p.owner, refunded);
+            _pay(p.owner, refunded);
         }
         emit PlanUpdated(id, interval, maxBuys, pulled, refunded);
     }
@@ -234,22 +268,32 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         _close(id, true);
     }
 
+    /// @notice Withdraw USDC that couldn't be paid out to you (see `owed`), to any address.
+    function claim(address to) external nonReentrant {
+        uint256 amount = owed[msg.sender];
+        if (amount == 0) revert NothingOwed();
+        owed[msg.sender] = 0;
+        totalOwed -= amount;
+        usdc.safeTransfer(to, amount);
+        emit Claimed(msg.sender, to, amount);
+    }
+
     // ================================================================ keeper
 
     /// @notice Run every due plan, up to `maxRuns`. This is what the scheduler calls.
+    /// Reverts with `InsufficientGas` unless `gasFor(id)` is left before each plan, so a gas estimate covers
+    /// every plan the call runs and an under-gassed call fails loudly instead of quietly doing part of it.
+    /// Keep `maxRuns` small enough that the worst case (`maxRuns` 5-leg savings plans) fits one transaction.
     function executeDue(uint256 maxRuns) external onlyKeeper nonReentrant returns (uint256 ran) {
         uint256[] memory ids = duePlans(maxRuns);
         for (uint256 i; i < ids.length; ++i) {
-            // Always attempt the first plan, so an under-gassed call reverts instead of quietly doing nothing.
-            if (i > 0 && gasleft() < GAS_PER_RUN) break;
             if (_execute(ids[i])) ++ran;
         }
     }
 
-    /// @notice Run specific plans. Plans that are not due are ignored.
+    /// @notice Run specific plans. Plans that are not due are ignored. Same gas rule as `executeDue`.
     function executeMany(uint256[] calldata ids) external onlyKeeper nonReentrant returns (uint256 ran) {
         for (uint256 i; i < ids.length; ++i) {
-            if (i > 0 && gasleft() < GAS_PER_RUN) break;
             if (_execute(ids[i])) ++ran;
         }
     }
@@ -279,6 +323,16 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     function perBuy(uint256 id) external view returns (uint256) {
         return _perBuy(id);
+    }
+
+    /// @notice Gas a keeper must leave for one run of plan `id` (its close included).
+    function gasFor(uint256 id) public view returns (uint256 gas) {
+        Leg[] storage legs = _legs[id];
+        gas = GAS_BASE;
+        for (uint256 i; i < legs.length; ++i) {
+            if (legs[i].amount != 0) gas += GAS_PER_LEG;
+        }
+        if (_plans[id].savings) gas += GAS_VAULT;
     }
 
     /// @notice What a new plan costs up front, at today's fees.
@@ -342,6 +396,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     }
 
     function setSwapAdapter(ISwapAdapter adapter) external onlyOwner {
+        if (address(adapter).code.length == 0) revert BadConfig();
         swapAdapter = adapter;
         emit ConfigChanged();
     }
@@ -397,14 +452,25 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     function _execute(uint256 id) internal returns (bool) {
         Plan storage p = _plans[id];
         if (!p.active || block.timestamp < p.nextRun) return false;
+        uint256 needed = gasFor(id);
+        if (gasleft() < needed) revert InsufficientGas(needed);
 
         uint256 per = _perBuy(id);
-        if (_value(p) < per + _feeFor(per, p.feeBps, p.minFee)) {
+        (uint256 value, bool vaultOk) = _valueOf(p);
+        if (!vaultOk) return _skipRun(id, p, true);
+        // The fee is charged from what is left after the buy (below), so ERC-4626 rounding dust in a savings
+        // plan can't cancel the last funded buy.
+        if (value < per) {
             _close(id, false); // ran out of budget
             return true;
         }
 
-        _take(p, per);
+        uint256 got = _take(p, per);
+        if (got < per) {
+            p.idle += got; // the vault didn't pay out: keep what came back and try again later
+            return _skipRun(id, p, true);
+        }
+
         uint32 buyIndex = p.buysDone + 1;
         uint256 spent;
         Leg[] storage legs = _legs[id];
@@ -414,27 +480,37 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
             if (_buyLeg(id, buyIndex, p.owner, leg)) spent += leg.amount;
         }
 
-        if (per > spent) _put(p, per - spent);
-        uint256 fee;
-        if (spent > 0) {
-            fee = _feeFor(spent, p.feeBps, p.minFee);
-            _take(p, fee);
-            usdc.safeTransfer(treasury, fee);
-            p.buysDone = buyIndex;
-            p.totalSpent += spent;
-            p.totalFees += fee;
-            uint256 used = spent + fee;
-            p.principal = p.principal > used ? p.principal - used : 0;
-        } else {
-            ++p.skippedRuns;
-        }
+        if (per > spent) _put(p, per - spent, false);
+        if (spent == 0) return _skipRun(id, p, false);
+
+        // Normally exactly the fee; less only if the plan holds less (rounding dust, a vault loss).
+        uint256 fee = _take(p, _feeFor(spent, p.feeBps, p.minFee));
+        _pay(treasury, fee);
+        p.buysDone = buyIndex;
+        p.skippedRuns = 0;
+        p.lastRun = uint64(block.timestamp);
+        p.totalSpent += spent;
+        p.totalFees += fee;
+        uint256 used = spent + fee;
+        p.principal = p.principal > used ? p.principal - used : 0;
 
         uint64 next = p.nextRun + p.interval;
         if (next <= block.timestamp) next = uint64(block.timestamp) + p.interval;
         p.nextRun = next;
-        emit Executed(id, p.buysDone, spent, fee, next);
+        emit Executed(id, buyIndex, spent, fee, next);
 
-        if (p.buysDone >= p.maxBuys || p.skippedRuns >= maxSkippedRuns) _close(id, false);
+        if (p.buysDone >= p.maxBuys) _close(id, false);
+        return true;
+    }
+
+    /// @dev Nothing was bought: retry soon, and retire the plan after `maxSkippedRuns` such runs in a row.
+    function _skipRun(uint256 id, Plan storage p, bool vault) internal returns (bool) {
+        if (vault) emit VaultUnavailable(id);
+        ++p.skippedRuns;
+        uint64 next = uint64(block.timestamp) + (p.interval < RETRY_DELAY ? p.interval : RETRY_DELAY);
+        p.nextRun = next;
+        emit Executed(id, p.buysDone, 0, 0, next);
+        if (p.skippedRuns >= maxSkippedRuns) _close(id, false);
         return true;
     }
 
@@ -478,12 +554,19 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         Plan storage p = _plans[id];
         uint256 assetsOut = p.idle;
         p.idle = 0;
+        uint256 sharesOut;
         if (p.shares > 0) {
-            assetsOut += p.vault.redeem(p.shares, address(this), address(this));
+            uint256 shares = p.shares;
             p.shares = 0;
+            try p.vault.redeem(shares, address(this), address(this)) returns (uint256 out) {
+                assetsOut += out;
+            } catch {
+                sharesOut = shares; // the vault can't pay out: the owner gets the vault shares themselves
+            }
         }
-        uint256 yieldEarned = assetsOut > p.principal ? assetsOut - p.principal : 0;
-        uint256 yieldFee = yieldEarned * yieldFeeBps / BPS;
+        // No yield fee when the owner is handed vault shares: what they are worth isn't known here.
+        uint256 yieldEarned = sharesOut == 0 && assetsOut > p.principal ? assetsOut - p.principal : 0;
+        uint256 yieldFee = yieldEarned * p.yieldFeeBps / BPS;
         p.principal = 0;
         p.active = false;
 
@@ -494,10 +577,22 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         _active.pop();
         delete _activePos[id];
 
-        if (yieldFee > 0) usdc.safeTransfer(treasury, yieldFee);
+        _pay(treasury, yieldFee);
         uint256 refund = assetsOut - yieldFee;
-        if (refund > 0) usdc.safeTransfer(p.owner, refund);
+        _pay(p.owner, refund);
+        if (sharesOut > 0) IERC20(address(p.vault)).safeTransfer(p.owner, sharesOut);
         emit PlanClosed(id, p.owner, refund, yieldEarned, yieldFee, cancelled);
+    }
+
+    /// @dev Pays out, or if the transfer fails (e.g. a blocklisted recipient) keeps it for them to `claim`,
+    /// so one recipient can't block the keeper's batch or anyone else's exit.
+    function _pay(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        if (!usdc.trySafeTransfer(to, amount)) {
+            owed[to] += amount;
+            totalOwed += amount;
+            emit PaymentDeferred(to, amount);
+        }
     }
 
     function _setLegs(uint256 id, address[] calldata tokens, uint256[] calldata amounts, bool fresh) internal {
@@ -548,30 +643,67 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         return (per + _feeFor(per, bps, floor)) * buys;
     }
 
-    function _value(Plan storage p) internal view returns (uint256) {
-        uint256 v = p.idle;
-        if (p.shares > 0) v += p.vault.previewRedeem(p.shares);
-        return v;
+    function _value(Plan storage p) internal view returns (uint256 v) {
+        (v,) = _valueOf(p);
     }
 
-    /// @dev Move `amount` USDC out of the plan's budget into this contract's loose balance.
-    function _take(Plan storage p, uint256 amount) internal {
-        if (amount == 0) return;
-        if (p.savings) {
-            uint256 burned = p.vault.withdraw(amount, address(this), address(this));
-            p.shares -= burned;
-        } else {
-            p.idle -= amount;
+    /// @dev USDC the plan holds; `ok` is false if the vault couldn't be read (then only idle USDC is counted).
+    function _valueOf(Plan storage p) internal view returns (uint256 v, bool ok) {
+        v = p.idle;
+        ok = true;
+        if (p.shares > 0) {
+            try p.vault.previewRedeem(p.shares) returns (uint256 a) {
+                v += a;
+            } catch {
+                ok = false;
+            }
         }
     }
 
-    /// @dev Move `amount` loose USDC into the plan's budget.
-    function _put(Plan storage p, uint256 amount) internal {
+    /// @dev Moves up to `amount` USDC out of the plan's budget into this contract's loose balance and returns
+    /// how much it moved: all of it unless the plan holds less or its vault doesn't pay out. Idle USDC goes
+    /// first. Vault shares are redeemed rounding in the plan's favour; any excess stays in the plan as idle.
+    function _take(Plan storage p, uint256 amount) internal returns (uint256 got) {
+        if (amount == 0) return 0;
+        got = Math.min(amount, p.idle);
+        p.idle -= got;
+        if (got == amount || p.shares == 0) return got;
+        uint256 need = amount - got;
+        uint256 shares;
+        try p.vault.previewWithdraw(need) returns (uint256 s) {
+            shares = Math.min(s, p.shares);
+        } catch {
+            return got;
+        }
+        try p.vault.redeem(shares, address(this), address(this)) returns (uint256 out) {
+            p.shares -= shares;
+            if (out > need) {
+                p.idle += out - need;
+                out = need;
+            }
+            got += out;
+        } catch {}
+    }
+
+    /// @dev Moves `amount` loose USDC into the plan's budget. `strict` (new money from the user): the vault
+    /// must take it and mint shares worth what went in (within 0.01%), or the call reverts. Otherwise (USDC
+    /// coming back from a run) a vault that won't take it leaves it idle in the plan.
+    function _put(Plan storage p, uint256 amount, bool strict) internal {
         if (amount == 0) return;
-        if (p.savings) {
-            usdc.forceApprove(address(p.vault), amount);
-            p.shares += p.vault.deposit(amount, address(this));
-        } else {
+        if (!p.savings) {
+            p.idle += amount;
+            return;
+        }
+        IERC4626 vault = p.vault;
+        usdc.forceApprove(address(vault), amount);
+        try vault.deposit(amount, address(this)) returns (uint256 minted) {
+            p.shares += minted;
+            if (strict && (minted == 0 || vault.previewRedeem(minted) + amount / 10_000 < amount)) {
+                revert BadVaultDeposit();
+            }
+        } catch {
+            if (strict) revert BadVaultDeposit();
+            usdc.forceApprove(address(vault), 0);
             p.idle += amount;
         }
     }

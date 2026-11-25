@@ -7,7 +7,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
 
 // Anvil's public default account #1 (local chain only).
-const devWallet = isLocal
+export const devWallet = isLocal
   ? createWalletClient({
       chain,
       transport: httpTransport(),

@@ -12,7 +12,7 @@ CODE=$(node -e 'console.log(require("./out/AerodromeCLAdapter.sol/AerodromeCLAda
 pad(){ $C to-uint256 "$1"; }
 bal=$($C index address $X 9); inner=$($C index address $X 10); allw=$($C index address $X "$inner")  # USDC balances / allowances slots
 run(){ local NAME=$1 TOKEN=$2 POOL=$3 FEED=$4
-  local ps; ps=$($C index address "$TOKEN" "$($C index address $USDC 1)")  # adapter pools[USDC][token]
+  local ps; ps=$($C index address "$TOKEN" "$($C index address $USDC 2)")  # adapter pools[USDC][token]
   local OUT; OUT=$($C call $X "swap(address,address,uint256,uint256,address)(uint256)" $USDC "$TOKEN" 100000000 0 $RCP \
     --from $X --override-code "$X:$CODE" \
     --override-state-diff "$X:$ps:$(pad "$POOL"),$USDC:$bal:$(pad 1000000000),$USDC:$allw:$(pad 1000000000)" --rpc-url "$R" | cut -d' ' -f1)

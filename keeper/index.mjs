@@ -5,13 +5,13 @@
 //   CHAIN_ID        31337 (local anvil, default), 84532 (Base Sepolia) or 8453 (Base)
 //   RPC_URL         defaults per chain
 //   INTERVAL_SEC    how often to check (default 60)
-//   MAX_RUNS        plans per transaction (default 25)
+//   MAX_RUNS        plans per transaction (default 5; each needs up to 2.55M gas, see gasFor)
 //
 // Flags: --once (one pass and exit), --sync-prices (testnet: drip savings yield at YIELD_APY, copy Chainlink prices from Base mainnet into the mock
 // feeds; testnet deployments only), --no-execute (skip running buys).
 //
 // In production the same call can come from a hosted scheduler instead: e.g. a KeeperHub workflow
-// "Schedule every 5 min -> Read dueCount() -> Condition > 0 -> Write executeDue(25)", with its wallet
+// "Schedule every 5 min -> Read dueCount() -> Condition > 0 -> Write executeDue(5)", with its wallet
 // allowed via setKeeper.
 
 import { readFileSync } from "node:fs";
@@ -116,18 +116,15 @@ async function runDue() {
   const due = await pub.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "dueCount" });
   if (due === 0n) return log("nothing due");
   if (!wallet) return log(`${due} plan(s) due, but KEEPER_KEY not set`);
-  const maxRuns = BigInt(process.env.MAX_RUNS ?? 25);
-  const runs = due < maxRuns ? due : maxRuns;
-  // executeDue stops early when gas runs low, so a bare estimate would budget for one plan only.
-  // Budget GAS_PER_RUN (900k) per plan plus overhead.
-  const gas = 300_000n + 900_000n * runs;
+  const maxRuns = BigInt(process.env.MAX_RUNS ?? 5);
+  // executeDue reverts unless every plan it runs has its gasFor() budget left, so the normal gas estimate
+  // covers all of them.
   const { request, result } = await pub.simulateContract({
     account,
     address: dep.basketoor,
     abi: basketoorAbi,
     functionName: "executeDue",
     args: [maxRuns],
-    gas,
   });
   const hash = await wallet.writeContract(request);
   const rcpt = await pub.waitForTransactionReceipt({ hash });

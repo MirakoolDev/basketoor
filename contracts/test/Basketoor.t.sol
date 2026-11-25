@@ -59,7 +59,7 @@ contract BasketoorTest is Test {
         amounts[0] = nvdaAmt;
         amounts[1] = tslaAmt;
         vm.prank(alice);
-        return b.createPlan("tech", tokens, amounts, 1 days, buys, savings);
+        return b.createPlan("tech", tokens, amounts, 1 days, buys, savings, type(uint256).max);
     }
 
     function _refreshPrices() internal {
@@ -215,12 +215,12 @@ contract BasketoorTest is Test {
 
         uint256 before = usdc.balanceOf(alice);
         vm.prank(alice);
-        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 11); // 10 buys left of $20 + $0.10
+        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 11, type(uint256).max); // 10 buys left of $20 + $0.10
         assertEq(before - usdc.balanceOf(alice), 10 * 20.1e6 - 4 * 20.1e6);
         assertEq(b.planValue(id), 10 * 20.1e6);
 
         vm.prank(alice);
-        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 3); // 2 left
+        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 3, type(uint256).max); // 2 left
         assertEq(b.planValue(id), 2 * 20.1e6);
     }
 
@@ -247,12 +247,12 @@ contract BasketoorTest is Test {
         amounts[1] = 5e6;
         vm.prank(alice);
         vm.expectRevert(Basketoor.BadLegs.selector);
-        b.createPlan("dup", tokens, amounts, 1 days, 3, false);
+        b.createPlan("dup", tokens, amounts, 1 days, 3, false, type(uint256).max);
 
         tokens[1] = address(usdc);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Basketoor.AssetNotEnabled.selector, address(usdc)));
-        b.createPlan("bad", tokens, amounts, 1 days, 3, false);
+        b.createPlan("bad", tokens, amounts, 1 days, 3, false, type(uint256).max);
     }
 
     function test_underGassedCallRevertsInsteadOfNoop() public {

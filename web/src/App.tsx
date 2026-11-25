@@ -1,20 +1,24 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useAccount, useDisconnect } from "wagmi";
 import { CHAIN_ID, dep } from "./config";
 import { short } from "./format";
-import { Card, ThemeToggle } from "./ui";
+import { Card, Spinner, ThemeToggle } from "./ui";
 import { Landing } from "./Landing";
 import { About } from "./About";
 import { Home } from "./Home";
 import { PlanForm } from "./PlanForm";
 import { PlanDetail } from "./PlanDetail";
 
-export type Route = { page: "home" } | { page: "about" } | { page: "new" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
+// Loaded only when opened: it carries the contracts' bytecode.
+const Deploy = lazy(() => import("./Deploy").then((m) => ({ default: m.Deploy })));
+
+export type Route = { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
 
 function parse(hash: string): Route {
   const [, a, b, c] = hash.replace(/^#/, "").split("/");
   if (a === "new") return { page: "new" };
   if (a === "about") return { page: "about" };
+  if (a === "deploy") return { page: "deploy" };
   if (a === "plan" && b && /^\d+$/.test(b)) return c === "edit" ? { page: "edit", id: BigInt(b) } : { page: "plan", id: BigInt(b) };
   return { page: "home" };
 }
@@ -33,10 +37,25 @@ export function App() {
   }, []);
   const { isConnected } = useAccount();
 
+  if (route.page === "deploy")
+    return (
+      <Shell>
+        <Suspense fallback={<Spinner />}>
+          <Deploy />
+        </Suspense>
+      </Shell>
+    );
+
   if (!dep)
     return (
       <Shell>
-        <Card>No deployment found for chain {CHAIN_ID}. Run the deploy script in contracts/ first.</Card>
+        <Card>
+          No deployment found for chain {CHAIN_ID}.{" "}
+          <a href="#/deploy" className="underline underline-offset-2">
+            Deploy one
+          </a>{" "}
+          or run the deploy script in contracts/.
+        </Card>
       </Shell>
     );
 

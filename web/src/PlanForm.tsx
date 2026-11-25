@@ -103,14 +103,14 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           address: dep.basketoor,
           abi: basketoorAbi,
           functionName: "updatePlan",
-          args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN] as const,
+          args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN, needs] as const, // never pull more than shown
         });
       } else {
         calls.push({
           address: dep.basketoor,
           abi: basketoorAbi,
           functionName: "createPlan",
-          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings] as const,
+          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, needs] as const, // never pull more than shown
         });
       }
       await send(calls as never);
@@ -239,7 +239,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           </div>
         )}
         {!q && kind === "stock" && (
-          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase. Buys during market closures are skipped and retried.</p>
+          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase. A buy that can't happen (market closed) is retried an hour later. If only part of a basket can buy, say crypto on a weekend, that run still counts as one of your buys and the skipped part's USDC is refunded at the end.</p>
         )}
       </Card>
 
