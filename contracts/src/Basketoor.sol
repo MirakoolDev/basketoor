@@ -26,6 +26,10 @@ import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 /// buy where every leg was skipped. On close, Basketoor keeps `yieldFeeBps` of the yield the plan earned.
 /// All three are fixed per plan when it is created.
 ///
+/// Smart buys (opt-in per plan): the leg amounts set the basket's target weights, and each buy splits the same
+/// USDC toward whichever stocks are furthest under their weight, valued at the oracle price. It only ever buys,
+/// never sells, so the basket drifts back toward its targets over the following buys.
+///
 /// A run where nothing could be bought (stale prices, savings vault not paying out) is retried after
 /// `RETRY_DELAY` instead of waiting a whole interval. Payouts that the recipient can't receive (e.g. a USDC
 /// blocklisted address) are kept for them to `claim` instead of blocking the keeper or anyone's exit.
@@ -38,10 +42,11 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     uint256 public constant MAX_YIELD_FEE_BPS = 3_000; // 30% of yield
     uint256 public constant MAX_SLIPPAGE_BPS = 1_000; // 10%
     /// @notice Gas budget per plan run: base + per active leg + savings vault. See `gasFor`. Measured on Base
-    /// mainnet against Aerodrome Slipstream pools: ~520k for one leg, ~300k for each extra one.
+    /// mainnet (eth_simulateV1) against Aerodrome Slipstream pools: ~2.94M for a first 5-leg run with savings and
+    /// smart buys, TWAP-priced legs and cold storage included. The budget leaves headroom over that.
     uint256 public constant GAS_BASE = 250_000;
-    uint256 public constant GAS_PER_LEG = 450_000;
-    uint256 public constant GAS_VAULT = 300_000;
+    uint256 public constant GAS_PER_LEG = 500_000;
+    uint256 public constant GAS_VAULT = 400_000;
     /// @notice A run that bought nothing is retried this long after (or after one interval, if shorter).
     uint64 public constant RETRY_DELAY = 1 hours;
 
@@ -72,6 +77,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint32 skippedRuns; // runs in a row where nothing was bought; reset by a buy
         bool active;
         bool savings; // budget sits in `vault`
+        bool smart; // smart buys: split each buy toward the target weights
         uint16 feeBps; // snapshot at creation
         uint16 yieldFeeBps; // snapshot at creation
         uint64 minFee; // snapshot at creation
@@ -134,6 +140,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     event PaymentDeferred(address indexed to, uint256 amount);
     event Claimed(address indexed from, address indexed to, uint256 amount);
     event Executed(uint256 indexed id, uint32 buyIndex, uint256 spent, uint256 fee, uint64 nextRun);
+    event SmartBuysSet(uint256 indexed id, bool on);
 
     event AssetSet(address indexed token, address feed, bool enabled);
     event KeeperSet(address indexed keeper, bool allowed);
@@ -180,6 +187,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint64 interval,
         uint32 maxBuys,
         bool savings,
+        bool smart,
         uint256 maxDeposit
     ) external nonReentrant returns (uint256 id) {
         if (createPaused) revert CreatePaused();
@@ -198,6 +206,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         p.feeBps = feeBps;
         p.minFee = minFee;
         p.yieldFeeBps = yieldFeeBps;
+        p.smart = smart;
         if (savings && address(savingsVault) != address(0)) {
             p.savings = true;
             p.vault = savingsVault;
@@ -216,6 +225,13 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         _activePos[id] = _active.length;
 
         emit PlanCreated(id, msg.sender, name, interval, maxBuys, p.savings, deposit);
+        if (smart) emit SmartBuysSet(id, true);
+    }
+
+    /// @notice Turn smart buys on or off. Changes how future buys are split, not how much they spend.
+    function setSmartBuys(uint256 id, bool on) external {
+        _ownedActive(id).smart = on;
+        emit SmartBuysSet(id, on);
     }
 
     /// @notice Change amounts, add stocks, change the frequency or the number of buys.
@@ -323,6 +339,33 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     function perBuy(uint256 id) external view returns (uint256) {
         return _perBuy(id);
+    }
+
+    /// @notice What each of the plan's stocks is worth now (USDC, 6 decimals, at the oracle price; 0 if there is
+    /// no price) and its target weight in bps. `drift` is how far the basket is from its targets: the sum of the
+    /// overweights, in bps of the basket's value.
+    function weightsOf(uint256 id)
+        external
+        view
+        returns (uint256[] memory values, uint256[] memory targetBps, uint256 drift)
+    {
+        Leg[] storage legs = _legs[id];
+        uint256 n = legs.length;
+        values = new uint256[](n);
+        targetBps = new uint256[](n);
+        uint256 per = _perBuy(id);
+        uint256 total;
+        for (uint256 i; i < n; ++i) {
+            (uint256 price,,) = priceOf(legs[i].token);
+            if (price != 0) values[i] = _usdcValue(legs[i].token, legs[i].received, price);
+            if (per != 0) targetBps[i] = legs[i].amount * BPS / per;
+            total += values[i];
+        }
+        if (total == 0) return (values, targetBps, 0);
+        for (uint256 i; i < n; ++i) {
+            uint256 w = values[i] * BPS / total;
+            if (w > targetBps[i]) drift += w - targetBps[i];
+        }
     }
 
     /// @notice Gas a keeper must leave for one run of plan `id` (its close included).
@@ -474,10 +517,10 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint32 buyIndex = p.buysDone + 1;
         uint256 spent;
         Leg[] storage legs = _legs[id];
+        (uint256[] memory prices, uint256[] memory allocs) = _allocate(legs, per, p.smart);
         for (uint256 i; i < legs.length; ++i) {
-            Leg storage leg = legs[i];
-            if (leg.amount == 0) continue;
-            if (_buyLeg(id, buyIndex, p.owner, leg)) spent += leg.amount;
+            if (allocs[i] == 0) continue;
+            if (_buyLeg(id, buyIndex, p.owner, legs[i], allocs[i], prices[i])) spent += allocs[i];
         }
 
         if (per > spent) _put(p, per - spent, false);
@@ -516,23 +559,26 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     /// @dev Buys one leg. The adapter only ever gets this leg's USDC, and the fill is measured at the
     /// recipient, so a bad adapter or route can't fill below the oracle bound.
-    function _buyLeg(uint256 id, uint32 buyIndex, address recipient, Leg storage leg) internal returns (bool) {
+    /// `price` is 0 when the oracle price is unavailable or stale: then the leg is skipped.
+    function _buyLeg(uint256 id, uint32 buyIndex, address recipient, Leg storage leg, uint256 amount, uint256 price)
+        internal
+        returns (bool)
+    {
         address token = leg.token;
-        (uint256 price,, bool usable) = priceOf(token);
-        if (!usable) {
+        if (price == 0) {
             emit LegSkipped(id, token, 1);
             return false;
         }
         Asset memory a = assets[token];
         // expected = amount(6dp) * 10^tokenDec * 10^feedDec / (price * 10^6)
-        uint256 expected = Math.mulDiv(leg.amount, 10 ** (uint256(a.tokenDecimals) + a.feedDecimals), price * 1e6);
+        uint256 expected = Math.mulDiv(amount, 10 ** (uint256(a.tokenDecimals) + a.feedDecimals), price * 1e6);
         uint256 minOut = expected * (BPS - maxSlippageBps) / BPS;
 
         ISwapAdapter adapter = swapAdapter;
         uint256 before = IERC20(token).balanceOf(recipient);
-        usdc.forceApprove(address(adapter), leg.amount);
+        usdc.forceApprove(address(adapter), amount);
         bool ok;
-        try adapter.swap(address(usdc), token, leg.amount, minOut, recipient) returns (uint256) {
+        try adapter.swap(address(usdc), token, amount, minOut, recipient) returns (uint256) {
             ok = true;
         } catch {}
         usdc.forceApprove(address(adapter), 0);
@@ -544,10 +590,68 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
             emit LegSkipped(id, token, 2);
             return false;
         }
-        leg.spent += leg.amount;
+        leg.spent += amount;
         leg.received += received;
-        emit Bought(id, buyIndex, token, leg.amount, received, price);
+        emit Bought(id, buyIndex, token, amount, received, price);
         return true;
+    }
+
+    /// @dev The usable oracle price of each leg (0 = skip it) and how much USDC each leg gets this run; the
+    /// amounts add up to `per`. Plain plans use the leg amounts. Smart plans aim every leg at its target weight
+    /// (its amount / `per`) of the basket after this buy, counting what the plan has bought so far at today's
+    /// price, and split `per` in proportion to how far under target each leg is. A leg that would get less than
+    /// `minLegAmount` hands its share to the leg furthest under target, so a buy never makes dust swaps. If any
+    /// active leg has no usable price the basket can't be valued, so the run falls back to the leg amounts.
+    function _allocate(Leg[] storage legs, uint256 per, bool smart)
+        internal
+        view
+        returns (uint256[] memory prices, uint256[] memory allocs)
+    {
+        uint256 n = legs.length;
+        prices = new uint256[](n);
+        allocs = new uint256[](n);
+        bool allPriced = true;
+        for (uint256 i; i < n; ++i) {
+            allocs[i] = legs[i].amount;
+            if (allocs[i] == 0) continue;
+            (uint256 price,, bool usable) = priceOf(legs[i].token);
+            if (usable) prices[i] = price;
+            else allPriced = false;
+        }
+        if (!smart || !allPriced) return (prices, allocs);
+
+        // deficit = max(0, target - value), target = (holdings + per) * amount / per. Deficits add up to >= per.
+        uint256[] memory deficits = new uint256[](n);
+        uint256 total = per;
+        for (uint256 i; i < n; ++i) {
+            if (allocs[i] == 0) continue;
+            deficits[i] = _usdcValue(legs[i].token, legs[i].received, prices[i]);
+            total += deficits[i];
+        }
+        uint256 deficitSum;
+        uint256 top = n; // the leg furthest under target
+        for (uint256 i; i < n; ++i) {
+            if (allocs[i] == 0) continue;
+            uint256 target = Math.mulDiv(total, legs[i].amount, per);
+            deficits[i] = target > deficits[i] ? target - deficits[i] : 0;
+            deficitSum += deficits[i];
+            if (top == n || deficits[i] > deficits[top]) top = i;
+        }
+        uint256 given;
+        for (uint256 i; i < n; ++i) {
+            if (allocs[i] == 0) continue;
+            uint256 a = i == top ? 0 : Math.mulDiv(per, deficits[i], deficitSum);
+            if (a < minLegAmount) a = 0;
+            allocs[i] = a;
+            given += a;
+        }
+        allocs[top] = per - given;
+    }
+
+    /// @dev USDC (6 decimals) value of `amount` of `token` at an oracle `price`.
+    function _usdcValue(address token, uint256 amount, uint256 price) internal view returns (uint256) {
+        Asset memory a = assets[token];
+        return Math.mulDiv(amount, price * 1e6, 10 ** (uint256(a.tokenDecimals) + a.feedDecimals));
     }
 
     function _close(uint256 id, bool cancelled) internal {

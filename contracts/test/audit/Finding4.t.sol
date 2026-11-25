@@ -50,7 +50,7 @@ contract ProofSkippedRunIsNotRetried is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 20e6;
         vm.prank(alice);
-        uint256 id = b.createPlan("weekly", tokens, amounts, 7 days, 10, false, type(uint256).max);
+        uint256 id = b.createPlan("weekly", tokens, amounts, 7 days, 10, false, false, type(uint256).max);
 
         // The keeper calls executeDue every 6 hours for four weeks. Day 0 and day 6 of each week are
         // closed-market days (price 27h old); on days 1-5 the price is fresh.

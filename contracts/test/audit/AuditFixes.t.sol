@@ -90,7 +90,7 @@ contract AuditFixesTest is Test {
     function _create(address who, uint256 amount, uint64 interval, uint32 buys, bool savings) internal returns (uint256) {
         (address[] memory t, uint256[] memory a) = _one(amount);
         vm.prank(who);
-        return b.createPlan("p", t, a, interval, buys, savings, MAX);
+        return b.createPlan("p", t, a, interval, buys, savings, false, MAX);
     }
 
     function _run() internal {
@@ -231,7 +231,7 @@ contract AuditFixesTest is Test {
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
         vm.expectRevert(Basketoor.BadVaultDeposit.selector);
-        b.createPlan("p", tk, a, 1 days, 2, true, MAX);
+        b.createPlan("p", tk, a, 1 days, 2, true, false, MAX);
     }
 
     // 12: createPlan and updatePlan refuse to pull more than the caller allowed.
@@ -242,7 +242,7 @@ contract AuditFixesTest is Test {
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Basketoor.DepositTooHigh.selector, b.quoteDeposit(10e6, 5)));
-        b.createPlan("p", tk, a, 1 days, 5, false, quote);
+        b.createPlan("p", tk, a, 1 days, 5, false, false, quote);
 
         uint256 id = _create(alice, 10e6, 1 days, 5, false);
         vm.prank(alice);

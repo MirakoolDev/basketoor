@@ -1,7 +1,7 @@
 import { parseAbi } from "viem";
 
 export const basketoorAbi = parseAbi([
-  "struct Plan { address owner; uint64 interval; uint64 nextRun; uint64 createdAt; uint64 lastRun; uint32 buysDone; uint32 maxBuys; uint32 skippedRuns; bool active; bool savings; uint16 feeBps; uint16 yieldFeeBps; uint64 minFee; address vault; uint256 shares; uint256 idle; uint256 principal; uint256 totalSpent; uint256 totalFees; string name; }",
+  "struct Plan { address owner; uint64 interval; uint64 nextRun; uint64 createdAt; uint64 lastRun; uint32 buysDone; uint32 maxBuys; uint32 skippedRuns; bool active; bool savings; bool smart; uint16 feeBps; uint16 yieldFeeBps; uint64 minFee; address vault; uint256 shares; uint256 idle; uint256 principal; uint256 totalSpent; uint256 totalFees; string name; }",
   "struct Leg { address token; uint256 amount; uint256 spent; uint256 received; }",
   "function getPlan(uint256 id) view returns (Plan plan, Leg[] legs)",
   "function plansOf(address user) view returns (uint256[])",
@@ -25,7 +25,9 @@ export const basketoorAbi = parseAbi([
   "function nextPlanId() view returns (uint256)",
   "function keepers(address) view returns (bool)",
   "function dueCount() view returns (uint256)",
-  "function createPlan(string name, address[] tokens, uint256[] amounts, uint64 interval, uint32 maxBuys, bool savings, uint256 maxDeposit) returns (uint256)",
+  "function createPlan(string name, address[] tokens, uint256[] amounts, uint64 interval, uint32 maxBuys, bool savings, bool smart, uint256 maxDeposit) returns (uint256)",
+  "function setSmartBuys(uint256 id, bool on)",
+  "function weightsOf(uint256 id) view returns (uint256[] values, uint256[] targetBps, uint256 drift)",
   "function owed(address) view returns (uint256)",
   "function claim(address to)",
   "function gasFor(uint256 id) view returns (uint256)",

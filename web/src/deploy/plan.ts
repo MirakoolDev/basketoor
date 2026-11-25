@@ -12,6 +12,7 @@ import {
 } from "viem";
 import bytecode from "./bytecode.json";
 import type { Deployment } from "../config";
+import { MAINNET, MAINNET_ASSETS, type MainnetAsset } from "./mainnet";
 
 /// The same testnet deployment as contracts/script/DeployTestnet.s.sol, as wallet calls instead of a Foundry
 /// broadcast. Contracts are created through the standard CREATE2 deployer (present on Base, Base Sepolia and
@@ -119,6 +120,90 @@ export function buildDeployment(roles: Roles, salt: Hex, chainId: number) {
     savingsVault: vault.creates,
     keeper,
     mock: true,
+    stocks,
+  });
+  return { batches, deployment };
+}
+
+const mainnetAbi = parseAbi([
+  "function setSavingsVault(address vault)",
+  "function setKeeper(address keeper, bool allowed)",
+  "function setAsset(address token, address feed, bool enabled)",
+  "function setPool(address tokenIn, address tokenOut, address pool)",
+]);
+const MAINNET_ASSETS_PER_BATCH = 5;
+
+/// Base mainnet: the Aerodrome swap adapter, Basketoor on real USDC with the Gauntlet USDC Prime savings vault,
+/// and every listed asset routed through its Aerodrome pool and priced from Chainlink, or from a 30-minute
+/// pool TWAP feed deployed here when Chainlink has none.
+export function buildMainnetDeployment(roles: Omit<Roles, "priceUpdater">, salt: Hex, assets: MainnetAsset[] = MAINNET_ASSETS) {
+  const { owner, keeper, treasury } = roles;
+  const create = (label: string, code: string, args: Hex = "0x"): Call & { creates: Address } => {
+    const s = keccak256(encodePacked(["bytes32", "string"], [salt, label]));
+    const initCode = concat([code as Hex, args]);
+    const creates = getContractAddress({ opcode: "CREATE2", from: CREATE2_DEPLOYER, salt: s, bytecode: initCode });
+    return { to: CREATE2_DEPLOYER, data: concat([s, initCode]), label: `Deploy ${label}`, creates };
+  };
+  const call = (to: Address, label: string, functionName: (typeof mainnetAbi)[number]["name"], args: readonly unknown[]): Call => ({
+    to,
+    label,
+    data: encodeFunctionData({ abi: mainnetAbi, functionName, args } as never),
+  });
+  const p = (types: string, values: readonly unknown[]) => encodeAbiParameters(parseAbiParameters(types), values as never);
+
+  const adapter = create("Aerodrome adapter", bytecode.AerodromeCLAdapter, p("address, address", [MAINNET.aerodromeClFactory, owner]));
+  const basketoor = create("Basketoor", bytecode.Basketoor, p("address, address, address, address", [MAINNET.usdc, adapter.creates, treasury, owner]));
+  const b = basketoor.creates;
+  const core: Call[] = [
+    adapter,
+    basketoor,
+    call(b, "Use Gauntlet USDC Prime for savings", "setSavingsVault", [MAINNET.savingsVault]),
+    call(b, "Allow the owner to run buys", "setKeeper", [owner, true]),
+  ];
+  if (keeper.toLowerCase() !== owner.toLowerCase()) core.push(call(b, "Allow the keeper to run buys", "setKeeper", [keeper, true]));
+  const batches: Batch[] = [{ title: "Core contracts", calls: core }];
+
+  const stocks: Deployment["stocks"] = [];
+  for (let i = 0; i < assets.length; i += MAINNET_ASSETS_PER_BATCH) {
+    const group = assets.slice(i, i + MAINNET_ASSETS_PER_BATCH);
+    const calls: Call[] = [];
+    for (const a of group) {
+      let feed = a.chainlink;
+      if (!feed) {
+        const twap = create(
+          `${a.symbol} TWAP feed`,
+          bytecode.PoolTwapFeed,
+          p("address, address, address, uint8, uint8, uint32", [a.pool, a.token, MAINNET.usdc, a.decimals, 6, MAINNET.twapWindow]),
+        );
+        calls.push(twap);
+        feed = twap.creates;
+      }
+      calls.push(
+        call(adapter.creates, `Route ${a.symbol} through its Aerodrome pool`, "setPool", [MAINNET.usdc, a.token, a.pool]),
+        call(b, `List ${a.symbol}`, "setAsset", [a.token, feed, true]),
+      );
+      stocks.push({
+        symbol: a.symbol,
+        name: a.name,
+        kind: a.kind,
+        token: a.token,
+        feed,
+        pool: a.pool,
+        pricing: !a.chainlink ? "twap" : a.allHours ? "chainlink-24/7" : "chainlink",
+      });
+    }
+    batches.push({ title: group.map((a) => a.symbol).join(", "), calls });
+  }
+
+  const deployment = (startBlock: number): Deployment => ({
+    chainId: 8453,
+    startBlock,
+    basketoor: b,
+    usdc: MAINNET.usdc,
+    venue: adapter.creates,
+    savingsVault: MAINNET.savingsVault,
+    keeper,
+    mock: false,
     stocks,
   });
   return { batches, deployment };

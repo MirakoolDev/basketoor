@@ -57,7 +57,7 @@ contract ProofSavingsRounding is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 10e6;
         vm.prank(alice);
-        return b.createPlan("p", tokens, amounts, 1 days, buys, true, type(uint256).max);
+        return b.createPlan("p", tokens, amounts, 1 days, buys, true, false, type(uint256).max);
     }
 
     function test_singleBuySavingsPlanActuallyBuys() public {

@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
-import { parseAbi, type Address, type PublicClient } from "viem";
+import { createPublicClient, http, parseAbi, type Address, type PublicClient } from "viem";
+import { base } from "viem/chains";
 import { basketoorAbi, erc20Abi } from "./abi";
 import { CHAIN_ID, dep, explorer } from "./config";
 import { useStocks } from "./data";
@@ -66,6 +67,7 @@ const SECTIONS = [
   ["assets", "Assets & price feeds"],
   ["parameters", "Live parameters"],
   ["flow", "How a buy works"],
+  ["costs", "Who pays the keeper"],
   ["trust", "Roles & trust"],
   ["mainnet", "Mainnet integration"],
   ["risks", "Known limitations"],
@@ -130,7 +132,10 @@ export function About() {
 
           <Section id="assets" title="Assets & price feeds">
             <p className="mb-4 text-sm text-muted">
-              Only assets the owner has listed with a Chainlink feed can be bought. The feed is what every fill is checked against.
+              Only assets the owner has listed with a price feed can be bought, and every fill is checked against it. Where Chainlink
+              has a feed, that's the price (NVDA, GOOGL and TSLA use Chainlink's 24/7 feeds, so they buy on weekends). Coinbase stocks
+              without a Chainlink feed are priced from a 30-minute time-weighted average of their own Aerodrome pool: the onchain
+              market price, which can drift from the stock's exchange price.
             </p>
             {!stocks.data ? (
               <Spinner />
@@ -147,8 +152,11 @@ export function About() {
                             {s.symbol} <span className="font-normal text-muted">{s.name}</span>
                           </div>
                           <div className="num text-xs text-muted">
-                            {s.usable ? money(s.price, { digits: s.price < 1 ? 4 : 2 }) : "Stale: buys skip"} · updated{" "}
-                            {s.updatedAt ? dateTime(s.updatedAt) : "never"} · {s.decimals} decimals
+                            {s.usable ? money(s.price, { digits: s.price < 1 ? 4 : 2 }) : "Stale: buys skip"} ·{" "}
+                            {s.pricing === "twap"
+                              ? "Aerodrome 30-min TWAP"
+                              : `${s.pricing === "chainlink-24/7" ? "Chainlink 24/7" : "Chainlink"}, updated ${s.updatedAt ? dateTime(s.updatedAt) : "never"}`}{" "}
+                            · {s.decimals} decimals
                           </div>
                         </div>
                       </div>
@@ -186,7 +194,8 @@ export function About() {
                 ["Create", "You approve USDC and call createPlan in one confirmation (batched with Base Account). The contract pulls (per-buy amount + fee) × number of buys. The first buy is due immediately."],
                 ["Wait", "Unspent USDC sits in the contract, or, with savings on, in the ERC-4626 savings vault, tracked per basket by its shares."],
                 ["Trigger", "An automated keeper (KeeperHub) checks dueCount() on a schedule and calls executeDue(). Only authorized keepers can call it, and they can only run baskets that are due."],
-                ["Price", "For each asset the contract reads Chainlink. A stale or unusable price skips that asset this round."],
+                ["Price", "For each asset the contract reads its feed: Chainlink, or a 30-minute TWAP of its Aerodrome pool. A stale or unusable price skips that asset this round."],
+                ["Split", "Normally each asset gets its set amount. With smart buys on, the same total is split toward whichever assets are furthest under their target share of the basket, valued at those prices. Nothing is ever sold."],
                 ["Swap", "The asset's USDC goes to the swap adapter, which buys on Aerodrome and sends the tokens straight to your wallet."],
                 ["Verify", "The contract measures your wallet's balance before and after. Less than the oracle price minus the slippage bound and the buy doesn't count."],
                 ["Charge", "The fee is taken only on USDC actually spent. Unused USDC goes back into the basket and the next buy is scheduled."],
@@ -202,6 +211,8 @@ export function About() {
               ))}
             </ol>
           </Section>
+
+          <Costs feeBps={d.data?.feeBps} minFee={d.data?.minFee} maxSkip={d.data?.maxSkip} />
 
           <Section id="trust" title="Roles & trust">
             <div className="grid gap-3 md:grid-cols-3">
@@ -232,7 +243,9 @@ export function About() {
               Coinbase's tokenized stocks are B20 tokens on Base (8 decimals), 1:1 backed by shares held in regulated custody. The
               deepest liquidity is in Aerodrome's concentrated-liquidity pools, so the mainnet adapter swaps directly against those.
               A simulation against live Base state on Nov 23, 2026 filled a $100 buy at 100.36% (NVDA) and 100.23% (AAPL) of the
-              Chainlink-implied amount.
+              Chainlink-implied amount. On Nov 25 the whole mainnet deployment (38 stocks, ETH and cbBTC, the Gauntlet USDC Prime
+              savings vault) was dry-run against live Base with eth_simulateV1, including a five-asset smart basket buying NVDA, AAPL,
+              PLTR, ETH and cbBTC and then being cancelled for a refund.
             </p>
             <Table>
               {[
@@ -254,10 +267,11 @@ export function About() {
           <Section id="risks" title="Known limitations">
             <ul className="space-y-2 text-sm leading-relaxed text-muted">
               {[
-                "Not audited by a third party yet. The contracts have a test suite and written self-review notes; an external review is in progress.",
+                "No manual audit yet. An automated audit by imd.fun found 15 issues: 13 are fixed, 1 partly, and 1 is accepted by design (see AUDIT.md in the repo).",
+                "Stocks without a Chainlink feed are checked against a 30-minute average of their own Aerodrome pool. It can't be moved within a block, but someone holding the pool price off for half an hour could shift it, and it tracks the token's onchain price, not the exchange's.",
                 "Swaps can be sandwiched up to the slippage bound (1.5%). The price check caps the damage; it doesn't remove it.",
                 "There's no Base sequencer-uptime check yet; a stale price during an outage is still bounded by the max price age.",
-                "Stock prices don't move while markets are closed. A weekend buy can use Friday's close, within the max price age.",
+                "Chainlink's market-hours stock feeds don't update while markets are closed, so a weekend buy can use Friday's close, within the max price age. 24/7 feeds and TWAP-priced assets keep tracking the market.",
                 "Fee-on-transfer and rebasing tokens aren't supported.",
                 "Tokenized stocks aren't available to US persons. Nothing here is investment advice.",
               ].map((t) => (
@@ -378,5 +392,69 @@ function Role({ who, can, cant }: { who: string; can: string[]; cant: string[] }
         ))}
       </ul>
     </div>
+  );
+}
+
+/// Gas for one keeper run, by basket shape: 1 and 5 assets measured with eth_simulateV1 against live Base (Nov 2026).
+const RUN_GAS: [shape: string, gas: number, perBuy: number][] = [
+  ["1 asset", 520_000, 10],
+  ["3 assets, savings on (estimate)", 1_900_000, 30], // between the two measured runs
+  ["5 assets, savings and smart buys", 2_940_000, 50],
+];
+
+/// The keeper is paid for out of fees: each run's gas cost next to the fee that run earns, at today's gas price and
+/// ETH price, both read from the chain.
+function Costs({ feeBps, minFee, maxSkip }: { feeBps?: number; minFee?: bigint; maxSkip?: number }) {
+  const pc = usePublicClient() as PublicClient;
+  const stocks = useStocks();
+  // Always Base mainnet's gas price: that's what the keeper pays, whichever network this page is on.
+  const gas = useQuery({
+    queryKey: ["gasPrice"],
+    refetchInterval: 60_000,
+    queryFn: () => (CHAIN_ID === 8453 ? pc : createPublicClient({ chain: base, transport: http() })).getGasPrice(),
+  });
+  const eth = stocks.data?.find((s) => s.symbol === "ETH")?.price;
+  const fee = (perBuy: number) =>
+    feeBps === undefined || minFee === undefined ? undefined : Math.max((perBuy * feeBps) / 10_000, Number(minFee) / 1e6);
+  const gwei = gas.data ? Number(gas.data) / 1e9 : undefined;
+  return (
+    <Section id="costs" title="Who pays the keeper">
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Every buy is sent by a keeper that pays Base gas. Fees go to the treasury, and the treasury keeps the keeper's gas wallet
+        topped up, so the service pays for itself out of what it earns and Basketoor keeps the rest. Here is what one run costs in gas
+        right now (Base gas {gwei === undefined ? "…" : `${gwei.toFixed(4)} gwei`}
+        {eth ? `, ETH at ${money(eth)}` : ""}) next to the fee it earns at the smallest basket of that shape. Base adds an L1 data fee of
+        a fraction of a cent per transaction, not shown.
+      </p>
+      <Table>
+        {RUN_GAS.map(([shape, units, perBuy]) => {
+          const cost = gas.data && eth ? (units * Number(gas.data) * eth) / 1e18 : undefined;
+          const f = fee(perBuy);
+          return (
+            <div key={shape} className="grid grid-cols-[1fr_auto_auto] items-center gap-6 py-3 text-sm">
+              <div>
+                <div className="font-medium">{shape}</div>
+                <div className="text-xs text-muted">
+                  {(units / 1e6).toFixed(2)}M gas · {money(perBuy)} per buy
+                </div>
+              </div>
+              <div className="num text-right">
+                <div>{cost === undefined ? "…" : money(cost, { digits: 4 })}</div>
+                <div className="text-xs text-muted">gas</div>
+              </div>
+              <div className="num text-right">
+                <div className="text-up">{f === undefined ? "…" : money(f)}</div>
+                <div className="text-xs text-muted">fee</div>
+              </div>
+            </div>
+          );
+        })}
+      </Table>
+      <p className="mt-3 text-xs leading-relaxed text-faint">
+        A run that buys nothing (say, a closed market) costs gas and earns no fee. It's retried an hour later, and a basket is refunded
+        after {maxSkip ?? "…"} such runs in a row. The savings yield fee adds a cut of the yield on waiting USDC. The contract never pays
+        the keeper directly: topping it up is the treasury's job.
+      </p>
+    </Section>
   );
 }

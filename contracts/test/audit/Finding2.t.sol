@@ -70,7 +70,7 @@ contract ProofVaultBlocksBatch is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 10e6;
         vm.prank(who);
-        return b.createPlan("p", tokens, amounts, 1 days, 2, savings, type(uint256).max);
+        return b.createPlan("p", tokens, amounts, 1 days, 2, savings, false, type(uint256).max);
     }
 
     function test_nonSavingsPlanStillRunsWhenVaultCannotPay() public {

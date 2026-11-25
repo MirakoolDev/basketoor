@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { basketoorAbi } from "./abi";
 import { dep, explorer } from "./config";
-import { useHistory, usePlan, useSend, useStocks, usd, type HistoryItem } from "./data";
+import { useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView } from "./data";
 import { countdown, date, dateTime, every, money, pct, qty, short } from "./format";
 import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo, useNow, valuePlan } from "./ui";
 import { go } from "./App";
@@ -105,6 +105,7 @@ export function PlanDetail({ id }: { id: bigint }) {
                     {l.stock?.symbol}
                     {l.amount === 0n && <Pill>paused</Pill>}
                     {l.stock && !l.stock.usable && <Pill tone="warn">market closed</Pill>}
+                    {l.stock?.pricing === "twap" && <Pill>market price</Pill>}
                   </div>
                   <div className="truncate text-xs text-muted">{l.stock?.name}</div>
                 </div>
@@ -122,6 +123,7 @@ export function PlanDetail({ id }: { id: bigint }) {
               </div>
             </Card>
           ))}
+          {p.weights && p.legs.length > 1 && p.buysDone > 0 && <Weights p={p} symbols={v.legs.map((l) => l.stock?.symbol ?? "?")} />}
           {p.savings && (
             <Card>
               <Row label="Savings yield so far" hint="on USDC waiting to be spent">
@@ -147,6 +149,9 @@ export function PlanDetail({ id }: { id: bigint }) {
           </Row>
           <Row label="Fees paid">{money(usd(p.totalFees))}</Row>
           <Row label="Savings">{p.savings ? "On" : "Off"}</Row>
+          <Row label="Smart buys" hint="each buy steers toward your target mix">
+            {p.smart ? "On" : "Off"}
+          </Row>
           <Row label="Skipped runs" hint="market closed or price check failed">
             {p.skippedRuns}
           </Row>
@@ -194,6 +199,56 @@ export function PlanDetail({ id }: { id: bigint }) {
         </BottomBar>
       )}
     </div>
+  );
+}
+
+/// A leg further than this from its target weight is flagged.
+const WEIGHT_LIMIT_BPS = 500;
+
+/// Target mix (from the per-buy amounts) next to the mix the basket holds now, valued at the oracle price.
+function Weights({ p, symbols }: { p: PlanView; symbols: string[] }) {
+  const w = p.weights!;
+  const total = w.valueUsd.reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  const rows = w.targetBps.map((t, i) => ({ sym: symbols[i], target: t, now: Math.round((w.valueUsd[i] / total) * 10_000) }));
+  const breached = rows.filter((r) => Math.abs(r.now - r.target) > WEIGHT_LIMIT_BPS);
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <div className="font-semibold">Mix</div>
+        {breached.length ? (
+          <Pill tone="warn">{breached.map((r) => r.sym).join(", ")} off target</Pill>
+        ) : (
+          <Pill tone="brand">on target</Pill>
+        )}
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {rows.map((r) => (
+          <div key={r.sym} className="text-sm">
+            <div className="flex justify-between">
+              <span className="font-medium">{r.sym}</span>
+              <span className="num text-muted">
+                {(r.now / 100).toFixed(1)}% <span className="text-faint">/ target {(r.target / 100).toFixed(0)}%</span>
+              </span>
+            </div>
+            <div className="relative mt-1 h-1.5 rounded-full bg-line">
+              <div
+                className={`h-1.5 rounded-full ${Math.abs(r.now - r.target) > WEIGHT_LIMIT_BPS ? "bg-down" : "bg-brand"}`}
+                style={{ width: `${Math.min(100, r.now / 100)}%` }}
+              />
+              <div className="absolute -top-0.5 h-2.5 w-0.5 bg-ink" style={{ left: `${r.target / 100}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        {breached.length
+          ? p.smart
+            ? "Smart buys is on: the next buys put more into what fell behind."
+            : "Turn on smart buys (Modify) to steer the next buys back toward your mix. Nothing is sold."
+          : `Every asset is within ${WEIGHT_LIMIT_BPS / 100} points of its target.`}
+      </p>
+    </Card>
   );
 }
 

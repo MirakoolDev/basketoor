@@ -1,4 +1,4 @@
-// Copies the creation bytecode of the contracts the testnet deploy page needs out of Foundry's build output.
+// Copies the creation bytecode of the contracts the deploy page needs out of Foundry's build output.
 // Run after `forge build` whenever the contracts change:  node scripts/export-bytecode.mjs
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,6 +13,8 @@ const pick = {
   MockFeed: "Mocks.sol/MockFeed.json",
   MockSwapAdapter: "Mocks.sol/MockSwapAdapter.json",
   MockSavingsVault: "Mocks.sol/MockSavingsVault.json",
+  AerodromeCLAdapter: "AerodromeCLAdapter.sol/AerodromeCLAdapter.json",
+  PoolTwapFeed: "PoolTwapFeed.sol/PoolTwapFeed.json",
 };
 
 const result = {};

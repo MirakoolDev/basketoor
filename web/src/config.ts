@@ -4,7 +4,15 @@ import { baseAccount, injected, mock } from "wagmi/connectors";
 import type { Address, Hex } from "viem";
 import { Attribution } from "ox/erc8021";
 
-export type Stock = { symbol: string; name: string; kind?: "stock" | "crypto"; token: Address; feed: Address };
+export type Stock = {
+  symbol: string;
+  name: string;
+  kind?: "stock" | "crypto";
+  token: Address;
+  feed: Address;
+  pricing?: "chainlink" | "chainlink-24/7" | "twap"; // mainnet: where the price comes from
+  pool?: Address; // mainnet: the Aerodrome pool it is bought through
+};
 export type Deployment = {
   chainId: number;
   startBlock: number;

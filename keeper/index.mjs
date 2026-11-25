@@ -5,7 +5,7 @@
 //   CHAIN_ID        31337 (local anvil, default), 84532 (Base Sepolia) or 8453 (Base)
 //   RPC_URL         defaults per chain
 //   INTERVAL_SEC    how often to check (default 60)
-//   MAX_RUNS        plans per transaction (default 5; each needs up to 2.55M gas, see gasFor)
+//   MAX_RUNS        plans per transaction (default 5; each needs up to 3.15M gas, see gasFor)
 //
 // Flags: --once (one pass and exit), --sync-prices (testnet: drip savings yield at YIELD_APY, copy Chainlink prices from Base mainnet into the mock
 // feeds; testnet deployments only), --no-execute (skip running buys).

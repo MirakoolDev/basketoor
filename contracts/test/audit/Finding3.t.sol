@@ -47,7 +47,7 @@ contract ProofSkippedRunsNeverReset is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 10e6;
         vm.prank(alice);
-        uint256 id = b.createPlan("daily", tokens, amounts, 1 days, 100, false, type(uint256).max);
+        uint256 id = b.createPlan("daily", tokens, amounts, 1 days, 100, false, false, type(uint256).max);
 
         // One run a day for 20 days. The price is too old on days 5, 12 and 19 only.
         for (uint256 day; day < 20; ++day) {

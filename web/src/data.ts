@@ -24,6 +24,7 @@ export type StockInfo = {
   price: number; // USD
   updatedAt: number;
   usable: boolean;
+  pricing: "chainlink" | "chainlink-24/7" | "twap"; // twap: priced from its own Aerodrome pool, not Chainlink
 };
 
 export type LegView = {
@@ -45,6 +46,7 @@ export type PlanView = {
   skippedRuns: number;
   active: boolean;
   savings: boolean;
+  smart: boolean; // smart buys: each buy steers toward the target weights
   feeBps: number;
   minFee: bigint;
   principal: bigint;
@@ -52,6 +54,7 @@ export type PlanView = {
   totalFees: bigint;
   value: bigint; // USDC held for the plan now
   legs: LegView[];
+  weights?: { valueUsd: number[]; targetBps: number[]; driftBps: number }; // from weightsOf; absent on old deployments
 };
 
 export const usd = (raw: bigint) => Number(raw) / 1e6;
@@ -84,6 +87,7 @@ export function useStocks() {
             price: Number(price) / 1e8,
             updatedAt: Number(updatedAt),
             usable,
+            pricing: s.pricing ?? "chainlink",
           };
         }),
       ),
@@ -119,9 +123,10 @@ export function useProtocol() {
 }
 
 async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
-  const [[p, legs], value] = await Promise.all([
+  const [[p, legs], value, w] = await Promise.all([
     pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "getPlan", args: [id] }),
     pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "planValue", args: [id] }),
+    pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "weightsOf", args: [id] }).catch(() => undefined),
   ]);
   return {
     id,
@@ -135,6 +140,7 @@ async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
     skippedRuns: p.skippedRuns,
     active: p.active,
     savings: p.savings,
+    smart: p.smart,
     feeBps: p.feeBps,
     minFee: p.minFee,
     principal: p.principal,
@@ -142,6 +148,7 @@ async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
     totalFees: p.totalFees,
     value,
     legs: legs.map((l) => ({ token: l.token, amount: l.amount, spent: l.spent, received: l.received })),
+    weights: w && { valueUsd: w[0].map(usd), targetBps: w[1].map(Number), driftBps: Number(w[2]) },
   };
 }
 

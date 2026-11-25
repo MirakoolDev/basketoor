@@ -5,7 +5,10 @@ import { CHAIN_ID, chain, explorer } from "./config";
 import { devWallet } from "./data";
 import { Button, Card, Pill, Spinner } from "./ui";
 import { Connect } from "./Landing";
-import { buildDeployment, CREATE2_DEPLOYER, type Batch } from "./deploy/plan";
+import { buildDeployment, buildMainnetDeployment, CREATE2_DEPLOYER, type Batch } from "./deploy/plan";
+import { MAINNET_ASSETS } from "./deploy/mainnet";
+
+const MAINNET = CHAIN_ID === 8453;
 
 type Saved = { salt: Hex; keeper: string; priceUpdater: string; treasury: string; startBlock?: number; done: number[] };
 type Status = { batch: number; step: string } | null;
@@ -28,20 +31,28 @@ function store(owner: string, s: Saved) {
   }
 }
 
-/// Deploys the testnet version of Basketoor from the connected wallet: test USDC, the mock venue and savings
-/// vault, Basketoor itself, and fifteen test assets with their price feeds. The wallet stays the owner.
+/// Deploys Basketoor from the connected wallet, which stays the owner. On testnets and anvil: test USDC, the mock
+/// venue and savings vault, and fifteen test assets with their price feeds. On Base mainnet: the Aerodrome adapter,
+/// Basketoor on real USDC with the Gauntlet savings vault, and the mainnet listing (see deploy/mainnet.ts).
 export function Deploy() {
   const { address, connector, isConnected } = useAccount();
-  if (CHAIN_ID === 8453)
-    return <Card>The deploy page only sets up test deployments. Mainnet uses real Coinbase stocks, Chainlink feeds and Aerodrome pools, so it gets its own script.</Card>;
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-[-0.02em]">Deploy to {chain.name}</h1>
-        <p className="mt-1 text-sm text-muted">
-          Sets up Basketoor with test USDC, a test swap venue, a test savings vault and 15 test assets with price feeds. Your wallet signs everything
-          and owns every contract.
-        </p>
+        {MAINNET ? (
+          <p className="mt-1 text-sm text-muted">
+            Deploys Basketoor on real USDC, the Aerodrome swap adapter and {MAINNET_ASSETS.length} assets:{" "}
+            {MAINNET_ASSETS.filter((a) => a.chainlink).length} priced by Chainlink and {MAINNET_ASSETS.filter((a) => !a.chainlink).length} by a
+            30-minute Aerodrome TWAP feed deployed here. Savings go to Gauntlet USDC Prime. Your wallet signs everything, owns every contract and
+            pays the gas (a few dollars at today's Base fees).
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-muted">
+            Sets up Basketoor with test USDC, a test swap venue, a test savings vault and 15 test assets with price feeds. Your wallet signs
+            everything and owns every contract.
+          </p>
+        )}
       </div>
       {!isConnected || !address ? (
         <Card>
@@ -76,13 +87,15 @@ function Deployer({ owner, mock }: { owner: Address; mock: boolean }) {
   const valid = [saved.keeper, saved.priceUpdater, saved.treasury].every((a) => isAddress(a));
   const plan = useMemo(
     () =>
-      valid
-        ? buildDeployment(
-            { owner, keeper: saved.keeper as Address, priceUpdater: saved.priceUpdater as Address, treasury: saved.treasury as Address },
-            saved.salt,
-            CHAIN_ID,
-          )
-        : undefined,
+      !valid
+        ? undefined
+        : MAINNET
+          ? buildMainnetDeployment({ owner, keeper: saved.keeper as Address, treasury: saved.treasury as Address }, saved.salt)
+          : buildDeployment(
+              { owner, keeper: saved.keeper as Address, priceUpdater: saved.priceUpdater as Address, treasury: saved.treasury as Address },
+              saved.salt,
+              CHAIN_ID,
+            ),
     [owner, saved.keeper, saved.priceUpdater, saved.treasury, saved.salt, valid],
   );
   const finished = !!plan && saved.done.length === plan.batches.length;
@@ -171,8 +184,8 @@ function Deployer({ owner, mock }: { owner: Address; mock: boolean }) {
           <div className="h-11 truncate rounded-xl bg-surface px-3 font-mono text-[13px] leading-[44px] text-muted">{owner}</div>
         </div>
         {field("Keeper", "Runs the scheduled buys, e.g. your KeeperHub wallet. You can add more later.", "keeper")}
-        {field("Price updater", "Copies Base mainnet Chainlink prices onto the test feeds (keeper/index.mjs --sync-prices).", "priceUpdater")}
-        {field("Treasury", "Receives the fees.", "treasury")}
+        {!MAINNET && field("Price updater", "Copies Base mainnet Chainlink prices onto the test feeds (keeper/index.mjs --sync-prices).", "priceUpdater")}
+        {field("Treasury", MAINNET ? "Receives the fees, and tops up the keeper's gas. A multisig is safest." : "Receives the fees.", "treasury")}
         {started && <p className="text-xs text-faint">Addresses are locked once the first batch is on chain.</p>}
       </Card>
 

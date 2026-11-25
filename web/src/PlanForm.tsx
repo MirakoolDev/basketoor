@@ -7,6 +7,7 @@ import { date, money } from "./format";
 import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo } from "./ui";
 import { go } from "./App";
 import { useTokenList, type ListToken } from "./tokens";
+import { COINBASE_STOCKS } from "./coinbaseStocks";
 
 const MAX = 5;
 const BUY_PRESETS = [7, 30, 90];
@@ -28,6 +29,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const [interval, setInterval] = useState(86400);
   const [buys, setBuys] = useState("30");
   const [savings, setSavings] = useState(true);
+  const [smart, setSmart] = useState(false);
   const [name, setName] = useState("");
   const [notUs, setNotUs] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -43,6 +45,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
     setBuys(String(plan.maxBuys - plan.buysDone));
     setName(plan.name);
     setSavings(plan.savings);
+    setSmart(plan.smart);
     setLoaded(true);
   }, [plan, loaded]);
 
@@ -105,12 +108,14 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           functionName: "updatePlan",
           args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN, needs] as const, // never pull more than shown
         });
+        if (smart !== plan.smart)
+          calls.push({ address: dep.basketoor, abi: basketoorAbi, functionName: "setSmartBuys", args: [plan.id, smart] as const });
       } else {
         calls.push({
           address: dep.basketoor,
           abi: basketoorAbi,
           functionName: "createPlan",
-          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, needs] as const, // never pull more than shown
+          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, smart, needs] as const, // never pull more than shown
         });
       }
       await send(calls as never);
@@ -129,13 +134,23 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const listedMatches = q ? (stocks.data ?? []).filter((x) => matches(x.symbol, x.name, x.token)) : [];
   const unlistedMatches = useMemo(() => {
     if (!q || !tokenList.data) return [];
-    const listedAddrs = new Set((stocks.data ?? []).map((x) => x.token.toLowerCase()));
+    // Coinbase stocks are shown in their own list below, listed or not.
+    const listedAddrs = new Set([...(stocks.data ?? []).map((x) => x.token), ...COINBASE_STOCKS.map((x) => x[2])].map((a) => a.toLowerCase()));
     return tokenList.data.tokens
       .filter((t) => !listedAddrs.has(t.address.toLowerCase()) && matches(t.symbol, t.name, t.address))
       .sort((a, b) => rank(a, q) - rank(b, q))
       .slice(0, 8);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, tokenList.data, stocks.data]);
+  // Coinbase stocks that exist on Base but have no onchain market deep enough to buy through yet.
+  const untradable = useMemo(() => {
+    if (!q || kind !== "stock") return [];
+    const listed = new Set((stocks.data ?? []).map((x) => x.symbol));
+    return COINBASE_STOCKS.filter(([sym, nm, addr]) => !listed.has(sym) && matches(sym, nm, addr))
+      .sort((a, b) => rank({ symbol: a[0], name: a[1] }, q) - rank({ symbol: b[0], name: b[1] }, q))
+      .slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, kind, stocks.data]);
 
   if (editing && !plan) return <Spinner />;
 
@@ -211,6 +226,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
                       <div className="text-sm font-semibold">{s.symbol}</div>
                       <div className="num truncate text-xs text-muted">
                         {s.usable ? money(s.price, { digits: s.price < 1 ? 4 : 2 }) : "Market closed"}
+                        {s.pricing === "twap" && <span className="text-faint" title="Priced from its Aerodrome market, not Chainlink"> · market price</span>}
                       </div>
                     </div>
                     {on && <span className="text-brand-ink">✓</span>}
@@ -219,7 +235,28 @@ export function PlanForm({ editId }: { editId?: bigint }) {
               })}
           </div>
         )}
-        {q && listedMatches.length === 0 && unlistedMatches.length === 0 && (
+        {untradable.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-2 text-xs font-medium text-muted">Coinbase stocks · not tradable on Base yet</div>
+            <div className="divide-y divide-line rounded-lg bg-surface-2 ring-1 ring-line">
+              {untradable.map(([sym, nm, addr]) => (
+                <div key={addr} className="flex items-center gap-2.5 p-2.5 text-faint">
+                  <StockLogo symbol={sym} token={addr} kind="stock" size={26} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{sym}</div>
+                    <div className="truncate text-xs">{nm}</div>
+                  </div>
+                  <Pill>soon</Pill>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-faint">
+              Coinbase has issued these on Base, but no onchain market holds enough USDC to buy them at a fair price yet. They get listed
+              once one does.
+            </p>
+          </div>
+        )}
+        {q && listedMatches.length === 0 && unlistedMatches.length === 0 && untradable.length === 0 && (
           <p className="py-3 text-center text-sm text-muted">
             {tokenList.isLoading ? "Searching Base tokens…" : "No Base token matches that."}
           </p>
@@ -233,13 +270,13 @@ export function PlanForm({ editId }: { editId?: bigint }) {
               ))}
             </div>
             <p className="mt-2 text-xs text-faint">
-              Basketoor only buys assets with a Chainlink price feed, so every buy can be checked against a real price. These
-              tokens don't have one listed yet.
+              Basketoor only buys assets it can check every fill against: a Chainlink feed, or a time-weighted price from a deep
+              onchain market. These tokens aren't listed yet.
             </p>
           </div>
         )}
         {!q && kind === "stock" && (
-          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase. A buy that can't happen (market closed) is retried an hour later. If only part of a basket can buy, say crypto on a weekend, that run still counts as one of your buys and the skipped part's USDC is refunded at the end.</p>
+          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase. Stocks marked "market price" have no Chainlink feed: they're priced from a 30-minute average of their own Aerodrome market, which can drift from the stock's exchange price. A buy that can't happen (market closed) is retried an hour later. If only part of a basket can buy, say crypto on a weekend, that run still counts as one of your buys and the skipped part's USDC is refunded at the end.</p>
         )}
       </Card>
 
@@ -346,6 +383,20 @@ export function PlanForm({ editId }: { editId?: bigint }) {
             />
           </label>
         )}
+        {selected.length > 1 && (
+          <label className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 font-semibold">
+                Smart buys <Pill tone="brand">keeps your mix</Pill>
+              </div>
+              <div className="mt-0.5 text-sm text-muted">
+                Your amounts set the mix you want. When one asset runs ahead, each buy puts more into the ones that fell behind, same
+                total per buy. It never sells.
+              </div>
+            </div>
+            <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} className="mt-1 h-5 w-5 accent-brand" />
+          </label>
+        )}
         <div>
           <div className="mb-2 font-semibold">Name</div>
           <input
@@ -408,7 +459,7 @@ function defaultName(symbols: string[]) {
 }
 
 /// Exact ticker first, then ticker prefix, then name matches.
-function rank(t: ListToken, q: string) {
+function rank(t: Pick<ListToken, "symbol" | "name">, q: string) {
   const sym = t.symbol.toLowerCase();
   if (sym === q) return 0;
   if (sym.startsWith(q)) return 1;
