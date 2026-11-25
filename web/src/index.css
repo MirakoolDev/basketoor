@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/* Base brand (brand.base.org): grayscale first, Base Blue reserved for the one most important element.
+   Colors are Base palette values; Base publishes no dark palette, so dark mode uses the same grays
+   and Cerulean for blue text (Base Blue on near-black fails AA). */
+
+:root {
+  --bg: #ffffff;
+  --surface: #eef0f3; /* Gray 10 */
+  --surface-2: #ffffff;
+  --line: #dee1e7; /* Gray 15 */
+  --ink: #0a0b0d; /* Gray 100 */
+  --muted: #5b616e; /* Gray 60 */
+  --faint: #717886; /* Gray 50 */
+  --brand: #0000ff; /* Base Blue */
+  --brand-ink: #0000ff;
+  --up: #3a7d00; /* Base Green #66c800 fails AA on white; this is its darker counterpart for text */
+  --down: #e0321a;
+  --warn: #ffd12f; /* Base Yellow, used as a fill with ink text */
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0b0d;
+  --surface: #16171b;
+  --surface-2: #0a0b0d;
+  --line: #32353d; /* Gray 80 */
+  --ink: #ffffff;
+  --muted: #b1b7c3; /* Gray 30 */
+  --faint: #717886; /* Gray 50 */
+  --brand: #0000ff;
+  --brand-ink: #3c8aff; /* Cerulean */
+  --up: #66c800; /* Base Green */
+  --down: #fc401f; /* Base Red */
+  --warn: #ffd12f;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a0b0d;
+    --surface: #16171b;
+    --surface-2: #0a0b0d;
+    --line: #32353d;
+    --ink: #ffffff;
+    --muted: #b1b7c3;
+    --faint: #717886;
+    --brand: #0000ff;
+    --brand-ink: #3c8aff;
+    --up: #66c800;
+    --down: #fc401f;
+    --warn: #ffd12f;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, monospace;
+  --font-doto: "Doto", ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+
+  --ease-base: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-feature-settings: "tnum" 1;
+}
+
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Base headline: medium, -3% tracking, 100% leading */
+.headline {
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.24s cubic-bezier(0.4, 0, 0.2, 1) both;
+}

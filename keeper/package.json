@@ -1,0 +1,13 @@
+{
+  "name": "basketoor-keeper",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env index.mjs",
+    "once": "node --env-file-if-exists=.env index.mjs --once",
+    "sync-prices": "node --env-file-if-exists=.env index.mjs --sync-prices --once --no-execute"
+  },
+  "dependencies": {
+    "viem": "^2.45.0"
+  }
+}
