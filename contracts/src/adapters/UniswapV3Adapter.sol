@@ -19,7 +19,7 @@ interface ISwapRouter02 {
 }
 
 /// @notice Mainnet venue: Uniswap v3 style router (SwapRouter02) with an owner-set path per stock,
-/// e.g. USDC -(500)-> NVDA. Basketoor still enforces the oracle bound on what arrives.
+/// e.g. USDC -(500)-> NVDA. DCAC still enforces the oracle bound on what arrives.
 contract UniswapV3Adapter is ISwapAdapter, Ownable {
     using SafeERC20 for IERC20;
 

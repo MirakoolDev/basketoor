@@ -4,13 +4,13 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
-import {Basketoor} from "../src/Basketoor.sol";
+import {DCAC} from "../src/DCAC.sol";
 import {ISwapAdapter} from "../src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter} from "../src/mocks/Mocks.sol";
 
 /// Smart buys: each buy steers the same USDC toward the stocks that are under their target weight.
 contract SmartBuysTest is Test {
-    Basketoor b;
+    DCAC b;
     MockUSDC usdc;
     MockSwapAdapter venue;
     MockStock nvda;
@@ -29,7 +29,7 @@ contract SmartBuysTest is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         nvda = new MockStock("NVIDIA", "NVDA", 8, admin);
         tsla = new MockStock("Tesla", "TSLA", 8, admin);
         nvdaFeed = new MockFeed(8, 100e8, admin);
@@ -72,7 +72,7 @@ contract SmartBuysTest is Test {
     }
 
     function _spent(uint256 id) internal view returns (uint256 n, uint256 t) {
-        (, Basketoor.Leg[] memory legs) = b.getPlan(id);
+        (, DCAC.Leg[] memory legs) = b.getPlan(id);
         return (legs[0].spent, legs[1].spent);
     }
 
@@ -95,10 +95,10 @@ contract SmartBuysTest is Test {
         (uint256 n, uint256 t) = _spent(id);
         assertApproxEqAbs(n, 15e6, 0.02e6); // the mock venue keeps a small fee, so holdings sit a hair under
         assertApproxEqAbs(t, 25e6, 0.02e6);
-        // the buy still spends exactly the per-buy amount, and the fee is unchanged
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        // the buy still spends exactly the per-buy amount; the fee is 0.5% + the 0.25% premium of $20 = $0.15
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.totalSpent, 40e6);
-        assertEq(p.totalFees, 2 * 100_000);
+        assertEq(p.totalFees, 2 * 150_000);
     }
 
     function test_overweightLegGetsNothing() public {
@@ -176,12 +176,101 @@ contract SmartBuysTest is Test {
     function test_toggle() public {
         uint256 id = _create(10e6, 10e6, false);
         vm.prank(bob);
-        vm.expectRevert(Basketoor.NotPlanOwner.selector);
-        b.setSmartBuys(id, true);
+        vm.expectRevert(DCAC.NotPlanOwner.selector);
+        b.setSmartBuys(id, true, type(uint256).max);
         vm.prank(alice);
-        b.setSmartBuys(id, true);
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        b.setSmartBuys(id, true, type(uint256).max);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertTrue(p.smart);
+    }
+
+    // ---------------------------------------------------------------- premium
+
+    function test_premiumOnlyOnSmartPlans() public {
+        uint256 plain = _create(50e6, 50e6, false);
+        uint256 smart = _create(50e6, 50e6, true);
+        (DCAC.Plan memory pp,) = b.getPlan(plain);
+        (DCAC.Plan memory ps,) = b.getPlan(smart);
+        // $100 per buy, 10 buys: 0.5% = $0.50 a buy plain, 0.75% = $0.75 with smart buys
+        assertEq(pp.principal, 10 * 100.5e6);
+        assertEq(ps.principal, 10 * 100.75e6);
+        vm.prank(keeper);
+        b.executeDue(10);
+        (pp,) = b.getPlan(plain);
+        (ps,) = b.getPlan(smart);
+        assertEq(pp.totalFees, 0.5e6);
+        assertEq(ps.totalFees, 0.75e6);
+        assertEq(usdc.balanceOf(treasury), 1.25e6);
+    }
+
+    function test_minFeeStillAppliesToSmallSmartPlans() public {
+        uint256 id = _create(5e6, 5e6, true); // 0.75% of $10 = $0.075, under the $0.10 minimum
+        vm.prank(keeper);
+        b.executeDue(10);
+        (DCAC.Plan memory p,) = b.getPlan(id);
+        assertEq(p.totalFees, 100_000);
+    }
+
+    function test_toggleResizesBudget() public {
+        uint256 id = _create(50e6, 50e6, false);
+        uint256 before = usdc.balanceOf(alice);
+        // on: 10 buys left need 10 x $0.25 more in fees
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(DCAC.DepositTooHigh.selector, 2.5e6));
+        b.setSmartBuys(id, true, 2.5e6 - 1);
+        vm.prank(alice);
+        b.setSmartBuys(id, true, 2.5e6);
+        assertEq(usdc.balanceOf(alice), before - 2.5e6);
+        (DCAC.Plan memory p,) = b.getPlan(id);
+        assertEq(p.principal, 10 * 100.75e6);
+        // one smart buy, then off: the 9 buys left get their premium back
+        vm.prank(keeper);
+        b.executeDue(10);
+        vm.prank(alice);
+        b.setSmartBuys(id, false, 0);
+        assertEq(usdc.balanceOf(alice), before - 2.5e6 + 9 * 0.25e6);
+        (p,) = b.getPlan(id);
+        assertEq(p.principal, 9 * 100.5e6);
+        assertEq(p.totalFees, 0.75e6);
+    }
+
+    function test_updatePlanCanToggleSmart() public {
+        uint256 id = _create(50e6, 50e6, false);
+        address[] memory t = new address[](2);
+        t[0] = address(nvda);
+        t[1] = address(tsla);
+        uint256[] memory a = new uint256[](2);
+        a[0] = 50e6;
+        a[1] = 50e6;
+        vm.prank(alice);
+        b.updatePlan(id, "smart", t, a, 1 days, 10, true, 2.5e6);
+        (DCAC.Plan memory p,) = b.getPlan(id);
+        assertTrue(p.smart);
+        assertEq(p.principal, 10 * 100.75e6);
+    }
+
+    function test_premiumIsSnapshotted() public {
+        uint256 id = _create(50e6, 50e6, false);
+        vm.prank(admin);
+        b.setSmartFee(100); // 1% for new plans
+        vm.prank(alice);
+        b.setSmartBuys(id, true, type(uint256).max); // this plan keeps its 0.25%
+        (DCAC.Plan memory p,) = b.getPlan(id);
+        assertEq(p.smartFeeBps, 25);
+        assertEq(p.principal, 10 * 100.75e6);
+    }
+
+    function test_feeCapIncludesPremium() public {
+        vm.startPrank(admin);
+        vm.expectRevert(DCAC.BadConfig.selector);
+        b.setSmartFee(151); // 0.5% + 1.51% > 2%
+        b.setSmartFee(150);
+        vm.expectRevert(DCAC.BadConfig.selector);
+        b.setFees(51, 100_000, 1_000);
+        vm.expectRevert();
+        vm.stopPrank();
+        vm.prank(alice);
+        b.setSmartFee(10);
     }
 
     function testFuzz_allocationSpendsExactlyPerBuy(uint256 nvdaAmt, uint256 tslaAmt, uint64 pn, uint64 pt) public {
@@ -193,7 +282,7 @@ contract SmartBuysTest is Test {
         _price(nvdaFeed, int256(uint256(bound(pn, 1e8, 10_000e8))));
         _price(tslaFeed, int256(uint256(bound(pt, 1e8, 10_000e8))));
         _nextRun();
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.totalSpent, 2 * (nvdaAmt + tslaAmt));
         (uint256 n, uint256 t) = _spent(id);
         assertEq(n + t, p.totalSpent);

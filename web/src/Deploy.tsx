@@ -13,7 +13,7 @@ const MAINNET = CHAIN_ID === 8453;
 type Saved = { salt: Hex; keeper: string; priceUpdater: string; treasury: string; startBlock?: number; done: number[] };
 type Status = { batch: number; step: string } | null;
 
-const storageKey = (owner: string) => `basketoor:deploy:${CHAIN_ID}:${owner.toLowerCase()}`;
+const storageKey = (owner: string) => `dcac:deploy:${CHAIN_ID}:${owner.toLowerCase()}`;
 const newSalt = () => keccak256(toHex(`${Date.now()}-${Math.random()}`));
 function load(owner: string): Saved | undefined {
   try {
@@ -31,9 +31,9 @@ function store(owner: string, s: Saved) {
   }
 }
 
-/// Deploys Basketoor from the connected wallet, which stays the owner. On testnets and anvil: test USDC, the mock
+/// Deploys DCAC from the connected wallet, which stays the owner. On testnets and anvil: test USDC, the mock
 /// venue and savings vault, and fifteen test assets with their price feeds. On Base mainnet: the Aerodrome adapter,
-/// Basketoor on real USDC with the Gauntlet savings vault, and the mainnet listing (see deploy/mainnet.ts).
+/// DCAC on real USDC with the Gauntlet savings vault, and the mainnet listing (see deploy/mainnet.ts).
 export function Deploy() {
   const { address, connector, isConnected } = useAccount();
   return (
@@ -42,14 +42,14 @@ export function Deploy() {
         <h1 className="text-2xl font-semibold tracking-[-0.02em]">Deploy to {chain.name}</h1>
         {MAINNET ? (
           <p className="mt-1 text-sm text-muted">
-            Deploys Basketoor on real USDC, the Aerodrome swap adapter and {MAINNET_ASSETS.length} assets:{" "}
+            Deploys DCAC on real USDC, the Aerodrome swap adapter and {MAINNET_ASSETS.length} assets:{" "}
             {MAINNET_ASSETS.filter((a) => a.chainlink).length} priced by Chainlink and {MAINNET_ASSETS.filter((a) => !a.chainlink).length} by a
             30-minute Aerodrome TWAP feed deployed here. Savings go to Gauntlet USDC Prime. Your wallet signs everything, owns every contract and
             pays the gas (a few dollars at today's Base fees).
           </p>
         ) : (
           <p className="mt-1 text-sm text-muted">
-            Sets up Basketoor with test USDC, a test swap venue, a test savings vault and 15 test assets with price feeds. Your wallet signs
+            Sets up DCAC with test USDC, a test swap venue, a test savings vault and 15 test assets with price feeds. Your wallet signs
             everything and owns every contract.
           </p>
         )}
@@ -264,13 +264,13 @@ function Result({ json }: { json: ReturnType<ReturnType<typeof buildDeployment>[
       <div>
         <div className="font-semibold">Deployed</div>
         <p className="mt-1 text-sm text-muted">
-          Basketoor is at{" "}
+          DCAC is at{" "}
           {explorer ? (
-            <a className="font-mono underline underline-offset-2" href={`${explorer}/address/${json.basketoor}`} target="_blank" rel="noreferrer">
-              {json.basketoor}
+            <a className="font-mono underline underline-offset-2" href={`${explorer}/address/${json.dcac}`} target="_blank" rel="noreferrer">
+              {json.dcac}
             </a>
           ) : (
-            <span className="font-mono">{json.basketoor}</span>
+            <span className="font-mono">{json.dcac}</span>
           )}
           . Save the deployment so the app and the keeper can find it at {file}. Saving reloads the app on the new contracts; restart the keeper
           so it picks them up too.

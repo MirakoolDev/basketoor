@@ -21,7 +21,7 @@ function saveDeployments(): Plugin {
           try {
             const d = JSON.parse(body);
             const addr = /^0x[0-9a-fA-F]{40}$/;
-            if (!Number.isInteger(d.chainId) || d.chainId <= 0 || !addr.test(d.basketoor) || !Array.isArray(d.stocks)) throw new Error("bad");
+            if (!Number.isInteger(d.chainId) || d.chainId <= 0 || !addr.test(d.dcac) || !Array.isArray(d.stocks)) throw new Error("bad");
             writeFileSync(new URL(`../contracts/deployments/${d.chainId}.json`, import.meta.url), JSON.stringify(d, null, 2) + "\n");
             res.end("ok");
           } catch {

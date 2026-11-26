@@ -1,17 +1,18 @@
-// Basketoor keeper: runs due buys, and on testnet keeps the mock stock prices in line with Base mainnet.
+// DCAC keeper: runs due buys, and on testnet keeps the mock stock prices in line with Base mainnet.
 //
 // Env:
-//   KEEPER_KEY      private key of an address allowed by Basketoor.setKeeper (required to execute)
+//   KEEPER_KEY      private key of an address allowed by DCAC.setKeeper (required to execute)
 //   CHAIN_ID        31337 (local anvil, default), 84532 (Base Sepolia) or 8453 (Base)
 //   RPC_URL         defaults per chain
 //   INTERVAL_SEC    how often to check (default 60)
-//   MAX_RUNS        plans per transaction (default 5; each needs up to 3.15M gas, see gasFor)
+//   MAX_RUNS        plans per transaction (default 3; each needs up to 4.15M gas, see gasFor). If the gas
+//                   estimate fails (e.g. over the per-transaction gas cap) it retries with fewer.
 //
 // Flags: --once (one pass and exit), --sync-prices (testnet: drip savings yield at YIELD_APY, copy Chainlink prices from Base mainnet into the mock
 // feeds; testnet deployments only), --no-execute (skip running buys).
 //
 // In production the same call can come from a hosted scheduler instead: e.g. a KeeperHub workflow
-// "Schedule every 5 min -> Read dueCount() -> Condition > 0 -> Write executeDue(5)", with its wallet
+// "Schedule every 5 min -> Read dueCount() -> Condition > 0 -> Write executeDue(3)", with its wallet
 // allowed via setKeeper.
 
 import { readFileSync } from "node:fs";
@@ -45,7 +46,7 @@ const key = process.env.KEEPER_KEY;
 const account = key ? privateKeyToAccount(key) : undefined;
 const wallet = account ? createWalletClient({ chain, transport, account }) : undefined;
 
-const basketoorAbi = parseAbi([
+const dcacAbi = parseAbi([
   "function dueCount() view returns (uint256)",
   "function executeDue(uint256 maxRuns) returns (uint256)",
 ]);
@@ -113,19 +114,25 @@ async function accrueMockYield() {
 }
 
 async function runDue() {
-  const due = await pub.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "dueCount" });
+  const due = await pub.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "dueCount" });
   if (due === 0n) return log("nothing due");
   if (!wallet) return log(`${due} plan(s) due, but KEEPER_KEY not set`);
-  const maxRuns = BigInt(process.env.MAX_RUNS ?? 5);
   // executeDue reverts unless every plan it runs has its gasFor() budget left, so the normal gas estimate
-  // covers all of them.
-  const { request, result } = await pub.simulateContract({
-    account,
-    address: dep.basketoor,
-    abi: basketoorAbi,
-    functionName: "executeDue",
-    args: [maxRuns],
-  });
+  // covers all of them. Several 5-asset baskets can need more gas than one transaction may use, so on a failed
+  // estimate try again with fewer plans.
+  let maxRuns = BigInt(process.env.MAX_RUNS ?? 3);
+  let sim;
+  for (;;) {
+    try {
+      sim = await pub.simulateContract({ account, address: dep.dcac, abi: dcacAbi, functionName: "executeDue", args: [maxRuns] });
+      break;
+    } catch (e) {
+      if (maxRuns <= 1n) throw e;
+      maxRuns = maxRuns / 2n;
+      log(`estimate failed, retrying with ${maxRuns} plan(s): ${e.shortMessage ?? e.message}`);
+    }
+  }
+  const { request, result } = sim;
   const hash = await wallet.writeContract(request);
   const rcpt = await pub.waitForTransactionReceipt({ hash });
   log(`ran ${result} of ${due} due plan(s): ${hash} (gas ${rcpt.gasUsed})`);
@@ -145,6 +152,6 @@ async function tick() {
   }
 }
 
-log(`keeper on chain ${chainId}, Basketoor ${dep.basketoor}, as ${account?.address ?? "(read-only)"}`);
+log(`keeper on chain ${chainId}, DCAC ${dep.dcac}, as ${account?.address ?? "(read-only)"}`);
 await tick();
 if (!once) setInterval(tick, Number(process.env.INTERVAL_SEC ?? 60) * 1000);

@@ -1,4 +1,4 @@
-// Writes src/logos.ts: monochrome 24x24 brand marks for the assets Basketoor lists, from simple-icons.
+// Writes src/logos.ts: monochrome 24x24 brand marks for the assets DCAC lists, from simple-icons.
 // Run after changing the asset list: node scripts/gen-logos.mjs
 import { writeFileSync } from "node:fs";
 import * as si from "simple-icons";

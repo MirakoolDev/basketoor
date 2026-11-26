@@ -20,6 +20,9 @@ export const MAINNET = {
   aerodromeClFactory: "0x9CB220581b91b0C83223012FE69688b92aD07a76",
   savingsVault: "0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61", // Gauntlet USDC Prime (Morpho)
   twapWindow: 1800, // seconds
+  // Launch fees, set at deploy. The owner can change them any time with setFees; each basket keeps the fees it
+  // was created with. (The minimum buy, $1 per asset, is separate: setLimits.)
+  fees: { feeBps: 50, minFee: 100_000n, yieldFeeBps: 1_000 }, // 0.5% per buy, $0.10 minimum fee, 10% of savings yield
 } as const;
 
 export const MAINNET_ASSETS: MainnetAsset[] = [

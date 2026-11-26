@@ -12,19 +12,19 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ISwapAdapter} from "./interfaces/ISwapAdapter.sol";
 import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 
-/// @title Basketoor
+/// @title DCAC
 /// @notice Recurring buys (DCA) of a basket of up to 5 tokenized stocks, paid in USDC, on Base.
 ///
 /// A user opens a plan: which stocks, how much USDC per stock per buy, how often, and how many buys.
 /// They deposit the whole budget up front: every buy plus its fee. While it waits, the budget can sit in
-/// an ERC-4626 savings vault and earn yield. Basketoor's keeper runs each buy when it is due. Every leg is
+/// an ERC-4626 savings vault and earn yield. DCAC's keeper runs each buy when it is due. Every leg is
 /// checked against the stock's Chainlink price, so a buy that would fill worse than the slippage limit, or
 /// against a stale price (market closed), is skipped and its USDC stays in the plan. Shares go straight to
 /// the user's wallet. The user can change or cancel the plan at any time and gets back what is unspent.
 ///
-/// Fees: per buy, the larger of `feeBps` of what was actually spent and `minFee`. Nothing is charged for a
-/// buy where every leg was skipped. On close, Basketoor keeps `yieldFeeBps` of the yield the plan earned.
-/// All three are fixed per plan when it is created.
+/// Fees: per buy, the larger of `feeBps` of what was actually spent and `minFee`, plus `smartFeeBps` while
+/// smart buys are on. Nothing is charged for a buy where every leg was skipped. On close, DCAC keeps
+/// `yieldFeeBps` of the yield the plan earned. All of them are fixed per plan when it is created.
 ///
 /// Smart buys (opt-in per plan): the leg amounts set the basket's target weights, and each buy splits the same
 /// USDC toward whichever stocks are furthest under their weight, valued at the oracle price. It only ever buys,
@@ -33,7 +33,7 @@ import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 /// A run where nothing could be bought (stale prices, savings vault not paying out) is retried after
 /// `RETRY_DELAY` instead of waiting a whole interval. Payouts that the recipient can't receive (e.g. a USDC
 /// blocklisted address) are kept for them to `claim` instead of blocking the keeper or anyone's exit.
-contract Basketoor is Ownable2Step, ReentrancyGuard {
+contract DCAC is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 public constant MAX_LEGS = 5;
@@ -42,10 +42,11 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     uint256 public constant MAX_YIELD_FEE_BPS = 3_000; // 30% of yield
     uint256 public constant MAX_SLIPPAGE_BPS = 1_000; // 10%
     /// @notice Gas budget per plan run: base + per active leg + savings vault. See `gasFor`. Measured on Base
-    /// mainnet (eth_simulateV1) against Aerodrome Slipstream pools: ~2.94M for a first 5-leg run with savings and
-    /// smart buys, TWAP-priced legs and cold storage included. The budget leaves headroom over that.
+    /// mainnet (eth_simulateV1) against Aerodrome Slipstream pools: ~3.1M for a first 5-leg run with savings and
+    /// smart buys, TWAP-priced legs and cold storage included. Single swaps through the tokenized-stock pools have
+    /// been seen at up to ~680k, so each leg is budgeted at 700k.
     uint256 public constant GAS_BASE = 250_000;
-    uint256 public constant GAS_PER_LEG = 500_000;
+    uint256 public constant GAS_PER_LEG = 700_000;
     uint256 public constant GAS_VAULT = 400_000;
     /// @notice A run that bought nothing is retried this long after (or after one interval, if shorter).
     uint64 public constant RETRY_DELAY = 1 hours;
@@ -79,6 +80,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         bool savings; // budget sits in `vault`
         bool smart; // smart buys: split each buy toward the target weights
         uint16 feeBps; // snapshot at creation
+        uint16 smartFeeBps; // snapshot at creation, charged on top of feeBps while `smart` is on
         uint16 yieldFeeBps; // snapshot at creation
         uint64 minFee; // snapshot at creation
         IERC4626 vault;
@@ -100,6 +102,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     uint16 public feeBps = 50; // 0.5%
     uint64 public minFee = 100_000; // $0.10
+    uint16 public smartFeeBps = 25; // +0.25% per buy while smart buys are on
     uint16 public yieldFeeBps = 1_000; // 10% of yield
     uint16 public maxSlippageBps = 150; // 1.5% from the oracle price
     uint64 public maxStaleness = 26 hours; // Chainlink stock feeds: 0.5% deviation / 24h heartbeat
@@ -204,6 +207,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         p.createdAt = uint64(block.timestamp);
         p.active = true;
         p.feeBps = feeBps;
+        p.smartFeeBps = smartFeeBps;
         p.minFee = minFee;
         p.yieldFeeBps = yieldFeeBps;
         p.smart = smart;
@@ -214,7 +218,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
         _setLegs(id, tokens, amounts, true);
 
-        uint256 deposit = _required(_perBuy(id), p.feeBps, p.minFee, maxBuys);
+        uint256 deposit = _required(_perBuy(id), _bps(p), p.minFee, maxBuys);
         if (deposit > maxDeposit) revert DepositTooHigh(deposit);
         usdc.safeTransferFrom(msg.sender, address(this), deposit);
         _put(p, deposit, true);
@@ -228,10 +232,15 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         if (smart) emit SmartBuysSet(id, true);
     }
 
-    /// @notice Turn smart buys on or off. Changes how future buys are split, not how much they spend.
-    function setSmartBuys(uint256 id, bool on) external {
-        _ownedActive(id).smart = on;
+    /// @notice Turn smart buys on or off. Changes how future buys are split, not how much they spend, but the
+    /// fee changes by the plan's `smartFeeBps`, so the budget is resized for the remaining buys: the extra
+    /// fees are pulled (at most `maxPull`) or the unneeded ones refunded.
+    function setSmartBuys(uint256 id, bool on, uint256 maxPull) external nonReentrant {
+        Plan storage p = _ownedActive(id);
+        p.smart = on;
         emit SmartBuysSet(id, on);
+        (uint256 pulled, uint256 refunded) = _resize(p, _perBuy(id), maxPull);
+        emit PlanUpdated(id, p.interval, p.maxBuys, pulled, refunded);
     }
 
     /// @notice Change amounts, add stocks, change the frequency or the number of buys.
@@ -246,6 +255,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         uint256[] calldata amounts,
         uint64 interval,
         uint32 maxBuys,
+        bool smart,
         uint256 maxPull
     ) external nonReentrant {
         Plan storage p = _ownedActive(id);
@@ -259,10 +269,19 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         }
         p.interval = interval;
         p.maxBuys = maxBuys;
+        if (smart != p.smart) {
+            p.smart = smart;
+            emit SmartBuysSet(id, smart);
+        }
 
-        uint256 required = _required(_perBuy(id), p.feeBps, p.minFee, maxBuys - p.buysDone);
-        uint256 pulled;
-        uint256 refunded;
+        (uint256 pulled, uint256 refunded) = _resize(p, _perBuy(id), maxPull);
+        emit PlanUpdated(id, interval, maxBuys, pulled, refunded);
+    }
+
+    /// Fund exactly the remaining buys at the plan's own fees: pull the difference (at most `maxPull`, and not
+    /// while new plans are paused) or refund it.
+    function _resize(Plan storage p, uint256 per, uint256 maxPull) internal returns (uint256 pulled, uint256 refunded) {
+        uint256 required = _required(per, _bps(p), p.minFee, p.maxBuys - p.buysDone);
         if (p.principal < required) {
             if (createPaused) revert CreatePaused();
             pulled = required - p.principal;
@@ -275,7 +294,6 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
             p.principal -= refunded;
             _pay(p.owner, refunded);
         }
-        emit PlanUpdated(id, interval, maxBuys, pulled, refunded);
     }
 
     /// @notice Stop the plan and get back everything unspent, plus yield (minus the yield fee).
@@ -378,7 +396,8 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         if (_plans[id].savings) gas += GAS_VAULT;
     }
 
-    /// @notice What a new plan costs up front, at today's fees.
+    /// @notice What a new plan without smart buys costs up front, at today's fees (with smart buys, add
+    /// `smartFeeBps` to `feeBps`).
     function quoteDeposit(uint256 perBuyAmount, uint32 buys) external view returns (uint256) {
         return _required(perBuyAmount, feeBps, minFee, buys);
     }
@@ -459,10 +478,17 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
 
     /// @dev Fees are snapshotted per plan, so changes only affect new plans.
     function setFees(uint16 feeBps_, uint64 minFee_, uint16 yieldFeeBps_) external onlyOwner {
-        if (feeBps_ > MAX_FEE_BPS || yieldFeeBps_ > MAX_YIELD_FEE_BPS || minFee_ > 5e6) revert BadConfig();
+        if (feeBps_ + smartFeeBps > MAX_FEE_BPS || yieldFeeBps_ > MAX_YIELD_FEE_BPS || minFee_ > 5e6) revert BadConfig();
         feeBps = feeBps_;
         minFee = minFee_;
         yieldFeeBps = yieldFeeBps_;
+        emit ConfigChanged();
+    }
+
+    /// @notice The smart-buys premium for new plans, on top of `feeBps`. The two together stay within the 2% cap.
+    function setSmartFee(uint16 smartFeeBps_) external onlyOwner {
+        if (feeBps + smartFeeBps_ > MAX_FEE_BPS) revert BadConfig();
+        smartFeeBps = smartFeeBps_;
         emit ConfigChanged();
     }
 
@@ -527,7 +553,7 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
         if (spent == 0) return _skipRun(id, p, false);
 
         // Normally exactly the fee; less only if the plan holds less (rounding dust, a vault loss).
-        uint256 fee = _take(p, _feeFor(spent, p.feeBps, p.minFee));
+        uint256 fee = _take(p, _feeFor(spent, _bps(p), p.minFee));
         _pay(treasury, fee);
         p.buysDone = buyIndex;
         p.skippedRuns = 0;
@@ -737,6 +763,11 @@ contract Basketoor is Ownable2Step, ReentrancyGuard {
     function _perBuy(uint256 id) internal view returns (uint256 total) {
         Leg[] storage legs = _legs[id];
         for (uint256 i; i < legs.length; ++i) total += legs[i].amount;
+    }
+
+    /// The plan's fee rate per buy: its base fee, plus its smart-buys premium while smart buys are on.
+    function _bps(Plan storage p) internal view returns (uint16) {
+        return p.smart ? p.feeBps + p.smartFeeBps : p.feeBps;
     }
 
     function _feeFor(uint256 spent, uint16 bps, uint64 floor) internal pure returns (uint256) {

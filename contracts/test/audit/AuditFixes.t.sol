@@ -7,7 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
-import {Basketoor} from "src/Basketoor.sol";
+import {DCAC} from "src/DCAC.sol";
 import {ISwapAdapter} from "src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter, MockSavingsVault} from "src/mocks/Mocks.sol";
 
@@ -43,7 +43,7 @@ contract FreezableVault is ERC4626 {
 
 /// Tests for the fixes to the imd.fun audit of commit b14b3cc (findings 1b and 5-14; 1-4 have their own files).
 contract AuditFixesTest is Test {
-    Basketoor b;
+    DCAC b;
     BlockableUSDC usdc;
     MockSwapAdapter venue;
     MockSavingsVault vault;
@@ -62,7 +62,7 @@ contract AuditFixesTest is Test {
         vm.startPrank(admin);
         usdc = new BlockableUSDC();
         venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         vault = new MockSavingsVault(usdc);
         stock = new MockStock("Apple", "AAPLc", 8, admin);
         feed = new MockFeed(8, 200e8, admin);
@@ -100,7 +100,7 @@ contract AuditFixesTest is Test {
         b.executeDue(10);
     }
 
-    function _plan(uint256 id) internal view returns (Basketoor.Plan memory p) {
+    function _plan(uint256 id) internal view returns (DCAC.Plan memory p) {
         (p,) = b.getPlan(id);
     }
 
@@ -128,7 +128,7 @@ contract AuditFixesTest is Test {
         uint256 id = _create(alice, 10e6, 1 days, 2, true);
         fv.setFrozen(true);
         _run();
-        Basketoor.Plan memory p = _plan(id);
+        DCAC.Plan memory p = _plan(id);
         assertEq(p.buysDone, 0);
         assertEq(p.skippedRuns, 1);
         assertEq(p.nextRun, block.timestamp + 1 hours, "retried in an hour");
@@ -197,8 +197,8 @@ contract AuditFixesTest is Test {
         assertFalse(_plan(id).active);
         assertGt(b.owed(treasury), 0);
 
-        vm.expectRevert(Basketoor.BadConfig.selector);
-        new Basketoor(usdc, ISwapAdapter(address(venue)), address(0), admin);
+        vm.expectRevert(DCAC.BadConfig.selector);
+        new DCAC(usdc, ISwapAdapter(address(venue)), address(0), admin);
     }
 
     // 9: a new frequency applies from the last buy.
@@ -209,7 +209,7 @@ contract AuditFixesTest is Test {
         vm.warp(t + 1 hours);
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
-        b.updatePlan(id, "p", tk, a, 1 hours, 10, MAX);
+        b.updatePlan(id, "p", tk, a, 1 hours, 10, false, MAX);
         assertEq(_plan(id).nextRun, t + 1 hours);
         vm.warp(t + 2 hours);
         _run();
@@ -230,7 +230,7 @@ contract AuditFixesTest is Test {
         vm.stopPrank();
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
-        vm.expectRevert(Basketoor.BadVaultDeposit.selector);
+        vm.expectRevert(DCAC.BadVaultDeposit.selector);
         b.createPlan("p", tk, a, 1 days, 2, true, false, MAX);
     }
 
@@ -238,16 +238,16 @@ contract AuditFixesTest is Test {
     function test_f12_maxDeposit() public {
         uint256 quote = b.quoteDeposit(10e6, 5);
         vm.prank(admin);
-        b.setFees(200, 5e6, 1000);
+        b.setFees(175, 5e6, 1000); // the 2% cap includes the 0.25% smart-buys premium
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Basketoor.DepositTooHigh.selector, b.quoteDeposit(10e6, 5)));
+        vm.expectRevert(abi.encodeWithSelector(DCAC.DepositTooHigh.selector, b.quoteDeposit(10e6, 5)));
         b.createPlan("p", tk, a, 1 days, 5, false, false, quote);
 
         uint256 id = _create(alice, 10e6, 1 days, 5, false);
         vm.prank(alice);
         vm.expectRevert();
-        b.updatePlan(id, "p", tk, a, 1 days, 6, 1);
+        b.updatePlan(id, "p", tk, a, 1 days, 6, false, 1);
     }
 
     // 13: topping up a plan is blocked while new plans are paused; shrinking still works.
@@ -257,19 +257,19 @@ contract AuditFixesTest is Test {
         b.setCreatePaused(true);
         (address[] memory tk, uint256[] memory a) = _one(10e6);
         vm.prank(alice);
-        vm.expectRevert(Basketoor.CreatePaused.selector);
-        b.updatePlan(id, "p", tk, a, 1 days, 6, MAX);
+        vm.expectRevert(DCAC.CreatePaused.selector);
+        b.updatePlan(id, "p", tk, a, 1 days, 6, false, MAX);
         vm.prank(alice);
-        b.updatePlan(id, "p", tk, a, 1 days, 2, MAX);
+        b.updatePlan(id, "p", tk, a, 1 days, 2, false, MAX);
         assertEq(_plan(id).maxBuys, 2);
     }
 
     // 14: the adapter must be a contract.
     function test_f14_adapterMustHaveCode() public {
         vm.startPrank(admin);
-        vm.expectRevert(Basketoor.BadConfig.selector);
+        vm.expectRevert(DCAC.BadConfig.selector);
         b.setSwapAdapter(ISwapAdapter(address(0)));
-        vm.expectRevert(Basketoor.BadConfig.selector);
+        vm.expectRevert(DCAC.BadConfig.selector);
         b.setSwapAdapter(ISwapAdapter(address(0xdead)));
         vm.stopPrank();
     }

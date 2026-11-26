@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, "../../contracts/out");
 const pick = {
-  Basketoor: "Basketoor.sol/Basketoor.json",
+  DCAC: "DCAC.sol/DCAC.json",
   MockUSDC: "Mocks.sol/MockUSDC.json",
   MockStock: "Mocks.sol/MockStock.json",
   MockFeed: "Mocks.sol/MockFeed.json",

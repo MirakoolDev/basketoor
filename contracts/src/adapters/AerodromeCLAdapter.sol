@@ -24,10 +24,10 @@ interface ICLFactory {
 
 /// @notice Mainnet venue: swaps directly against an owner-chosen Aerodrome concentrated-liquidity pool per
 /// pair (where Coinbase's tokenized stocks are deepest), with no router in between.
-/// The adapter checks `minOut` itself, so a thin pool makes this leg's swap revert (Basketoor skips the
-/// leg and keeps its USDC) rather than under-delivering. Basketoor still re-checks what arrives.
+/// The adapter checks `minOut` itself, so a thin pool makes this leg's swap revert (DCAC skips the
+/// leg and keeps its USDC) rather than under-delivering. DCAC still re-checks what arrives.
 /// Trust: the owner picks the pools, but only among pools the Slipstream factory created for the pair; use the
-/// same key (and two-step handover) as Basketoor's owner.
+/// same key (and two-step handover) as DCAC's owner.
 contract AerodromeCLAdapter is ISwapAdapter, Ownable2Step {
     using SafeERC20 for IERC20;
 

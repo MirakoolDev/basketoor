@@ -16,7 +16,7 @@ export type Stock = {
 export type Deployment = {
   chainId: number;
   startBlock: number;
-  basketoor: Address;
+  dcac: Address;
   usdc: Address;
   venue: Address;
   savingsVault: Address;
@@ -37,7 +37,7 @@ export const isLocal = CHAIN_ID === 31337;
 export const explorer =
   CHAIN_ID === 8453 ? "https://basescan.org" : CHAIN_ID === 84532 ? "https://sepolia.basescan.org" : "";
 
-// Base Builder Code (dashboard.base.org): attributes Basketoor's transactions via an ERC-8021 data suffix.
+// Base Builder Code (dashboard.base.org): attributes DCAC's transactions via an ERC-8021 data suffix.
 const builderCode = import.meta.env.VITE_BUILDER_CODE as string | undefined;
 export const dataSuffix: Hex | undefined = builderCode
   ? Attribution.toDataSuffix({ codes: [builderCode] })
@@ -49,7 +49,7 @@ const DEV_ACCOUNT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" as const;
 export const wagmiConfig = createConfig({
   chains: [chain],
   connectors: [
-    baseAccount({ appName: "Basketoor", appLogoUrl: undefined }),
+    baseAccount({ appName: "DCAC", appLogoUrl: undefined }),
     injected(),
     ...(isLocal ? [mock({ accounts: [DEV_ACCOUNT], features: { reconnect: true } })] : []),
   ],

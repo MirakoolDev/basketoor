@@ -19,7 +19,7 @@ interface ICLPoolOracle {
 /// @notice A Chainlink-style USD price for a token with no Chainlink feed, read from the time-weighted average
 /// price (TWAP) of its Aerodrome Slipstream pool against USDC, counting 1 USDC as $1.
 ///
-/// Basketoor uses it exactly like a Chainlink feed: a buy must fill within `maxSlippageBps` of this price. A
+/// DCAC uses it exactly like a Chainlink feed: a buy must fill within `maxSlippageBps` of this price. A
 /// TWAP can't be moved within one block, so a buy can't be sandwiched against it, but someone willing to hold
 /// the pool price off for the whole window can shift it. Use it only for deep pools, with a window long enough
 /// to make that expensive. The price is the token's onchain market price, not the underlying stock's.

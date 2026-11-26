@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { maxUint256, type Address } from "viem";
-import { basketoorAbi, erc20Abi } from "./abi";
+import { useAccount } from "wagmi";
+import { formatEther, maxUint256, parseAbi, type Address } from "viem";
+import { dcacAbi, erc20Abi } from "./abi";
 import { dep, FREQUENCIES } from "./config";
 import { usePlan, useProtocol, useSend, useStocks, useUsdc, usd } from "./data";
 import { date, money } from "./format";
@@ -12,6 +13,14 @@ import { COINBASE_STOCKS } from "./coinbaseStocks";
 const MAX = 5;
 const BUY_PRESETS = [7, 30, 90];
 
+// Paying with ETH: wrap it and swap to USDC through the same Aerodrome adapter and ETH/USDC pool baskets buy
+// ETH with. The swap must return at least the missing USDC, so it sends a little extra ETH; the leftover USDC
+// stays in the wallet.
+const ETH_BUFFER_BPS = 50n; // 0.5% over the Chainlink price, covers the pool fee and price movement
+const GAS_RESERVE = 200_000_000_000_000n; // 0.0002 ETH kept back for gas
+const wethAbi = parseAbi(["function deposit() payable", "function approve(address spender, uint256 amount) returns (bool)"]);
+const adapterAbi = parseAbi(["function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minOut, address recipient) returns (uint256)"]);
+
 export function PlanForm({ editId }: { editId?: bigint }) {
   const stocks = useStocks();
   const protocol = useProtocol();
@@ -20,6 +29,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const editing = editId !== undefined;
   const plan = editing ? existing.data : undefined;
   const send = useSend();
+  const { address: account } = useAccount();
 
   const [selected, setSelected] = useState<Address[]>([]);
   const [kind, setKind] = useState<"stock" | "crypto">("stock");
@@ -65,7 +75,10 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const perBuy = parsed.reduce((s, p) => s + p.raw, 0n);
   const buysN = Math.max(0, Math.floor(Number(buys) || 0));
 
-  const feeBps = plan?.feeBps ?? protocol.data?.feeBps ?? 50;
+  const smartOn = smart && selected.length > 1; // auto-rebalance needs two or more assets
+  const smartFeeBps = plan?.smartFeeBps ?? protocol.data?.smartFeeBps ?? 0;
+  const baseFeeBps = plan?.feeBps ?? protocol.data?.feeBps ?? 50;
+  const feeBps = baseFeeBps + (smartOn ? smartFeeBps : 0);
   const minFee = plan?.minFee ?? protocol.data?.minFee ?? 100_000n;
   const feePerBuy = perBuy === 0n ? 0n : (perBuy * BigInt(feeBps)) / 10_000n > minFee ? (perBuy * BigInt(feeBps)) / 10_000n : minFee;
   const required = (perBuy + feePerBuy) * BigInt(buysN);
@@ -76,6 +89,17 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const tooSmall = parsed.some((p) => p.raw > 0n && p.usd < minLeg);
   const balance = usdc.data?.balance ?? 0n;
   const needs = delta > 0n ? delta : 0n;
+
+  // Pay the missing USDC with ETH (real deployments only; the testnet venue is a mock).
+  const weth = dep.mock ? undefined : stocks.data?.find((s) => s.symbol === "ETH");
+  const shortfall = needs > balance ? needs - balance : 0n;
+  const ethPrice8 = weth?.usable ? BigInt(Math.round(weth.price * 1e8)) : 0n;
+  const ethIn = shortfall > 0n && ethPrice8 > 0n ? ((shortfall * 10n ** 20n) / ethPrice8) * (10_000n + ETH_BUFFER_BPS) / 10_000n : 0n;
+  const ethBalance = usdc.data?.eth ?? 0n;
+  const canPayEth = ethIn > 0n && ethBalance >= ethIn + GAS_RESERVE;
+  const [payEth, setPayEth] = useState(false);
+  const usingEth = payEth && canPayEth;
+
   const problem = !selected.length
     ? "Pick at least one asset"
     : perBuy === 0n
@@ -84,7 +108,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
         ? `Each asset needs at least ${money(minLeg)} per buy`
         : buysN < 1
           ? "Set the number of buys"
-          : needs > balance
+          : needs > balance && !usingEth
             ? `Not enough USDC: needs ${money(usd(needs))}`
             : !editing && !notUs
               ? "Confirm you're not a US person"
@@ -99,23 +123,28 @@ export function PlanForm({ editId }: { editId?: bigint }) {
       const tokens = parsed.map((p) => p.token);
       const amts = parsed.map((p) => p.raw);
       const calls = [];
+      if (usingEth && weth) {
+        calls.push(
+          { address: weth.token, abi: wethAbi, functionName: "deposit", args: [] as const, value: ethIn },
+          { address: weth.token, abi: wethAbi, functionName: "approve", args: [dep.venue, ethIn] as const },
+          { address: dep.venue, abi: adapterAbi, functionName: "swap", args: [weth.token, dep.usdc, ethIn, shortfall, account] as const },
+        );
+      }
       if (needs > 0n && (usdc.data?.allowance ?? 0n) < needs)
-        calls.push({ address: dep.usdc, abi: erc20Abi, functionName: "approve", args: [dep.basketoor, maxUint256] as const });
+        calls.push({ address: dep.usdc, abi: erc20Abi, functionName: "approve", args: [dep.dcac, maxUint256] as const });
       if (editing && plan) {
         calls.push({
-          address: dep.basketoor,
-          abi: basketoorAbi,
+          address: dep.dcac,
+          abi: dcacAbi,
           functionName: "updatePlan",
-          args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN, needs] as const, // never pull more than shown
+          args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN, smartOn, needs] as const, // never pull more than shown
         });
-        if (smart !== plan.smart)
-          calls.push({ address: dep.basketoor, abi: basketoorAbi, functionName: "setSmartBuys", args: [plan.id, smart] as const });
       } else {
         calls.push({
-          address: dep.basketoor,
-          abi: basketoorAbi,
+          address: dep.dcac,
+          abi: dcacAbi,
           functionName: "createPlan",
-          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, smart, needs] as const, // never pull more than shown
+          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, smartOn, needs] as const, // never pull more than shown
         });
       }
       await send(calls as never);
@@ -270,7 +299,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
               ))}
             </div>
             <p className="mt-2 text-xs text-faint">
-              Basketoor only buys assets it can check every fill against: a Chainlink feed, or a time-weighted price from a deep
+              DCAC only buys assets it can check every fill against: a Chainlink feed, or a time-weighted price from a deep
               onchain market. These tokens aren't listed yet.
             </p>
           </div>
@@ -370,7 +399,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
                 Savings <Pill tone="brand">earns yield</Pill>
               </div>
               <div className="mt-0.5 text-sm text-muted">
-                USDC waiting for its turn sits in a savings vault. Basketoor keeps {(protocol.data?.yieldFeeBps ?? 1000) / 100}% of the
+                USDC waiting for its turn sits in a savings vault. DCAC keeps {(protocol.data?.yieldFeeBps ?? 1000) / 100}% of the
                 yield.
               </div>
             </div>
@@ -387,11 +416,12 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           <label className="flex items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 font-semibold">
-                Smart buys <Pill tone="brand">keeps your mix</Pill>
+                Auto-rebalance <Pill tone="brand">no selling</Pill>
               </div>
               <div className="mt-0.5 text-sm text-muted">
-                Your amounts set the mix you want. When one asset runs ahead, each buy puts more into the ones that fell behind, same
-                total per buy. It never sells.
+                Your amounts are your target mix: $10 NVDA + $10 TSLA means 50/50. If NVDA jumps and grows to 60% of your basket, the
+                next buys put more into TSLA until you're back to 50/50. You spend the same each buy, and nothing gets sold.
+                {smartFeeBps > 0 && ` Adds ${smartFeeBps / 100}% to the fee per buy.`}
               </div>
             </div>
             <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} className="mt-1 h-5 w-5 accent-brand" />
@@ -427,6 +457,25 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           <Row label="Total deposit">
             <span className="text-base font-semibold">{money(usd(required))}</span>
           </Row>
+        )}
+        {shortfall > 0n && ethIn > 0n && (
+          <label className="mt-3 flex items-start justify-between gap-4 rounded-lg bg-bg p-3 ring-1 ring-line">
+            <div className="text-sm">
+              <div className="font-semibold">Pay the missing {money(usd(shortfall))} with ETH</div>
+              <div className="mt-0.5 text-muted">
+                {canPayEth
+                  ? `Swaps about ${Number(formatEther(ethIn)).toFixed(5)} ETH to USDC on Aerodrome first, in the same confirmation where your wallet allows it. Up to about 0.5% extra USDC stays in your wallet.`
+                  : `Needs about ${Number(formatEther(ethIn + GAS_RESERVE)).toFixed(5)} ETH, including a little for gas. You have ${Number(formatEther(ethBalance)).toFixed(5)}.`}
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={usingEth}
+              disabled={!canPayEth}
+              onChange={(e) => setPayEth(e.target.checked)}
+              className="mt-1 h-4 w-4 accent-brand"
+            />
+          </label>
         )}
         <p className="mt-2 text-xs leading-relaxed text-faint">
           Each buy is checked against the Chainlink price; anything worse than {(protocol.data?.maxSlippageBps ?? 150) / 100}% or a

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @notice The part of Chainlink's AggregatorV3Interface Basketoor reads.
+/// @notice The part of Chainlink's AggregatorV3Interface DCAC reads.
 interface IAggregatorV3 {
     function decimals() external view returns (uint8);
 

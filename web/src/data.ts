@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePublicClient, useWalletClient, useAccount } from "wagmi";
 import type { Abi, Address, Hex, PublicClient } from "viem";
-import { basketoorAbi, erc20Abi } from "./abi";
+import { dcacAbi, erc20Abi } from "./abi";
 import { createWalletClient, http as httpTransport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
@@ -48,6 +48,7 @@ export type PlanView = {
   savings: boolean;
   smart: boolean; // smart buys: each buy steers toward the target weights
   feeBps: number;
+  smartFeeBps: number; // extra fee per buy while smart buys are on
   minFee: bigint;
   principal: bigint;
   totalSpent: bigint;
@@ -75,7 +76,7 @@ export function useStocks() {
       Promise.all(
         dep.stocks.map(async (s) => {
           const [[price, updatedAt, usable], decimals] = await Promise.all([
-            pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "priceOf", args: [s.token] }),
+            pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [s.token] }),
             pc.readContract({ address: s.token, abi: erc20Abi, functionName: "decimals" }),
           ]);
           return {
@@ -100,10 +101,11 @@ export function useProtocol() {
     queryKey: ["protocol"],
     staleTime: Infinity,
     queryFn: async () => {
-      const read = (functionName: "feeBps" | "minFee" | "yieldFeeBps" | "minLegAmount" | "maxSlippageBps" | "savingsVault") =>
-        pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName });
-      const [feeBps, minFee, yieldFeeBps, minLegAmount, maxSlippageBps, savingsVault] = await Promise.all([
+      const read = (functionName: "feeBps" | "smartFeeBps" | "minFee" | "yieldFeeBps" | "minLegAmount" | "maxSlippageBps" | "savingsVault") =>
+        pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName });
+      const [feeBps, smartFeeBps, minFee, yieldFeeBps, minLegAmount, maxSlippageBps, savingsVault] = await Promise.all([
         read("feeBps"),
+        read("smartFeeBps").catch(() => 0), // older deployments have no premium
         read("minFee"),
         read("yieldFeeBps"),
         read("minLegAmount"),
@@ -112,6 +114,7 @@ export function useProtocol() {
       ]);
       return {
         feeBps: Number(feeBps),
+        smartFeeBps: Number(smartFeeBps),
         minFee: minFee as bigint,
         yieldFeeBps: Number(yieldFeeBps),
         minLegAmount: minLegAmount as bigint,
@@ -124,9 +127,9 @@ export function useProtocol() {
 
 async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
   const [[p, legs], value, w] = await Promise.all([
-    pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "getPlan", args: [id] }),
-    pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "planValue", args: [id] }),
-    pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName: "weightsOf", args: [id] }).catch(() => undefined),
+    pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "getPlan", args: [id] }),
+    pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "planValue", args: [id] }),
+    pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "weightsOf", args: [id] }).catch(() => undefined),
   ]);
   return {
     id,
@@ -142,6 +145,7 @@ async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
     savings: p.savings,
     smart: p.smart,
     feeBps: p.feeBps,
+    smartFeeBps: p.smartFeeBps,
     minFee: p.minFee,
     principal: p.principal,
     totalSpent: p.totalSpent,
@@ -161,8 +165,8 @@ export function useMyPlans() {
     refetchInterval: 15_000,
     queryFn: async () => {
       const ids = await pc.readContract({
-        address: dep.basketoor,
-        abi: basketoorAbi,
+        address: dep.dcac,
+        abi: dcacAbi,
         functionName: "plansOf",
         args: [address!],
       });
@@ -187,7 +191,7 @@ export function useUsdc() {
     queryFn: async () => {
       const [balance, allowance, eth] = await Promise.all([
         pc.readContract({ address: dep.usdc, abi: erc20Abi, functionName: "balanceOf", args: [address!] }),
-        pc.readContract({ address: dep.usdc, abi: erc20Abi, functionName: "allowance", args: [address!, dep.basketoor] }),
+        pc.readContract({ address: dep.usdc, abi: erc20Abi, functionName: "allowance", args: [address!, dep.dcac] }),
         pc.getBalance({ address: address! }),
       ]);
       return { balance, allowance, eth };
@@ -216,8 +220,8 @@ export function useHistory(id: bigint) {
       for (let from = BigInt(dep.startBlock); from <= latest; from += CHUNK) {
         const to = from + CHUNK - 1n > latest ? latest : from + CHUNK - 1n;
         const chunk = await pc.getContractEvents({
-          address: dep.basketoor,
-          abi: basketoorAbi,
+          address: dep.dcac,
+          abi: dcacAbi,
           args: { id } as never,
           fromBlock: from,
           toBlock: to,
@@ -270,7 +274,7 @@ export function useSend() {
   const wallet = connector?.id === "mock" && devWallet ? devWallet : connected;
   const pc = usePublicClient();
   const qc = useQueryClient();
-  return async (calls: { address: Address; abi: Abi; functionName: string; args: readonly unknown[] }[]) => {
+  return async (calls: { address: Address; abi: Abi; functionName: string; args: readonly unknown[]; value?: bigint }[]) => {
     if (!wallet || !pc) throw new Error("Connect a wallet first");
     const finish = () => qc.invalidateQueries();
     if (calls.length > 1) {
@@ -279,7 +283,7 @@ export function useSend() {
         const atomic = (caps as { atomic?: { status?: string } } | undefined)?.atomic?.status;
         if (atomic === "supported" || atomic === "ready") {
           const { id } = await wallet.sendCalls({
-            calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args })) as never,
+            calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value })) as never,
             capabilities: dataSuffix ? { dataSuffix: { value: dataSuffix, optional: true } } : undefined,
           });
           const res = await wallet.waitForCallsStatus({ id });

@@ -101,7 +101,7 @@ type Theme = "system" | "light" | "dark";
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(() => {
     try {
-      const t = localStorage.getItem("basketoor-theme");
+      const t = localStorage.getItem("dcac-theme");
       return t === "light" || t === "dark" ? t : "system";
     } catch {
       return "system";
@@ -112,8 +112,8 @@ export function ThemeToggle() {
     if (theme === "system") delete root.dataset.theme;
     else root.dataset.theme = theme;
     try {
-      if (theme === "system") localStorage.removeItem("basketoor-theme");
-      else localStorage.setItem("basketoor-theme", theme);
+      if (theme === "system") localStorage.removeItem("dcac-theme");
+      else localStorage.setItem("dcac-theme", theme);
     } catch {
       /* storage blocked: the choice just won't persist */
     }

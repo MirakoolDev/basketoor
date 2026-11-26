@@ -1,6 +1,6 @@
-# Basketoor
+# DCAC
 
-**Stack stocks on autopilot.** Pick up to five tokenized stocks on Base, set how much and how often, deposit the budget once. Basketoor buys on schedule, onchain, straight into your wallet.
+**Stack stocks on autopilot.** Pick up to five tokenized stocks on Base, set how much and how often, deposit the budget once. DCAC buys on schedule, onchain, straight into your wallet.
 
 Built for Base's *Stocks Maxxing Season*, Programmable Stock Markets track (custom portfolios).
 
@@ -10,10 +10,10 @@ Everything except the alarm clock:
 
 | | Where |
 |---|---|
-| The plan: stocks, $ per stock, frequency, number of buys, name | `Basketoor.createPlan` / `updatePlan` |
-| The budget, escrowed, optionally earning yield in an ERC-4626 savings vault | `Basketoor` |
-| Each buy: due check, Chainlink price check (1.5% max slippage, stale price = market closed = skip), swap, shares to the user's wallet | `Basketoor._execute` |
-| Fees: per buy, max(0.5% of what filled, $0.10); nothing if every leg was skipped; 10% of savings yield | `Basketoor` |
+| The plan: stocks, $ per stock, frequency, number of buys, name | `DCAC.createPlan` / `updatePlan` |
+| The budget, escrowed, optionally earning yield in an ERC-4626 savings vault | `DCAC` |
+| Each buy: due check, Chainlink price check (1.5% max slippage, stale price = market closed = skip), swap, shares to the user's wallet | `DCAC._execute` |
+| Fees: per buy, max(0.5% of what filled, or 0.75% while auto-rebalance is on, and a $0.10 minimum fee), owner-set via `setFees` / `setSmartFee`; minimum buy $1 per asset (`setLimits`); nothing if every leg was skipped; 10% of savings yield | `DCAC` |
 | Average buy price, P&L, buy count | counters per leg + `Bought` events |
 | Order history | `Bought` / `LegSkipped` / `Executed` events |
 | Modify (budget resized to fund exactly the remaining buys) / Terminate (full refund + yield) | `updatePlan` / `cancelPlan` |
@@ -23,7 +23,7 @@ The keeper can't move anyone's money: it can only trigger a buy that is due, at 
 
 ## Layout
 
-- `contracts/`: Foundry. `src/Basketoor.sol`, `src/adapters/UniswapV3Adapter.sol` (mainnet venue), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`.
+- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/UniswapV3Adapter.sol` (mainnet venue), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`.
 - `keeper/`: Node script that calls `executeDue` and, on testnet, copies real Base mainnet Chainlink prices into the mock feeds.
 - `web/`: Vite + React + wagmi/viem. Base Account sign-in, EIP-5792 batched approve + create, Base Builder Code attribution (`VITE_BUILDER_CODE`).
 
@@ -53,8 +53,8 @@ There are no tokenized stocks on Base Sepolia, so the script deploys the ten Coi
 ### Hosted keeper (KeeperHub)
 
 Instead of running `keeper/`: a KeeperHub workflow on Base Sepolia (84532) or Base (8453):
-Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(5)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 450k per leg + 300k with savings) left.
-Then allow the workflow's wallet: `Basketoor.setKeeper(<KeeperHub wallet>, true)`.
+Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(3)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 400k with savings, so up to 4.15M) left. Three plans per transaction keeps it under the per-transaction gas cap.
+Then allow the workflow's wallet: `DCAC.setKeeper(<KeeperHub wallet>, true)`.
 
 ## Mainnet: still open
 

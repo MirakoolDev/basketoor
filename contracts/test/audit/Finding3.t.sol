@@ -3,14 +3,14 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
-import {Basketoor} from "src/Basketoor.sol";
+import {DCAC} from "src/DCAC.sol";
 import {ISwapAdapter} from "src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter} from "src/mocks/Mocks.sol";
 
 /// skippedRuns is only ever incremented. A plan that fills six runs between every fully skipped run is
 /// still closed once its lifetime total of skipped runs reaches maxSkippedRuns.
 contract ProofSkippedRunsNeverReset is Test {
-    Basketoor b;
+    DCAC b;
     MockUSDC usdc;
     MockStock stock;
     MockFeed feed;
@@ -26,7 +26,7 @@ contract ProofSkippedRunsNeverReset is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         MockSwapAdapter venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         stock = new MockStock("Apple", "AAPLc", 8, admin);
         feed = new MockFeed(8, 200e8, admin);
         stock.setMinter(address(venue));
@@ -59,7 +59,7 @@ contract ProofSkippedRunsNeverReset is Test {
             b.executeDue(10);
         }
 
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertTrue(p.active, "plan was closed although it never missed two runs in a row");
     }
 }

@@ -4,14 +4,14 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
-import {Basketoor} from "src/Basketoor.sol";
+import {DCAC} from "src/DCAC.sol";
 import {ISwapAdapter} from "src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter, MockSavingsVault} from "src/mocks/Mocks.sol";
 
 /// Savings plans: ERC-4626 share rounding leaves planValue 1 wei under the budget, so the budget check in
 /// _execute closes the plan ("ran out of budget") instead of doing the buy the user paid for.
 contract ProofSavingsRounding is Test {
-    Basketoor b;
+    DCAC b;
     MockUSDC usdc;
     MockSwapAdapter venue;
     MockSavingsVault vault;
@@ -29,7 +29,7 @@ contract ProofSavingsRounding is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         vault = new MockSavingsVault(usdc);
         stock = new MockStock("Apple", "AAPLc", 8, admin);
         feed = new MockFeed(8, 180e8, admin);
@@ -64,7 +64,7 @@ contract ProofSavingsRounding is Test {
         uint256 id = _create(1); // pulls 10.10 USDC: one $10 buy + $0.10 fee
         vm.prank(keeper);
         b.executeDue(10);
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.buysDone, 1, "the one funded buy never ran");
         assertGt(stock.balanceOf(alice), 0, "no stock delivered");
     }
@@ -78,7 +78,7 @@ contract ProofSavingsRounding is Test {
             vm.prank(keeper);
             b.executeDue(10);
         }
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.buysDone, 3, "last funded buy was dropped");
     }
 }

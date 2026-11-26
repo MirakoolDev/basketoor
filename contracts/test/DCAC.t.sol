@@ -5,12 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {Basketoor} from "../src/Basketoor.sol";
+import {DCAC} from "../src/DCAC.sol";
 import {ISwapAdapter} from "../src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter, MockSavingsVault} from "../src/mocks/Mocks.sol";
 
-contract BasketoorTest is Test {
-    Basketoor b;
+contract DCACTest is Test {
+    DCAC b;
     MockUSDC usdc;
     MockSwapAdapter venue;
     MockSavingsVault vault;
@@ -29,7 +29,7 @@ contract BasketoorTest is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         vault = new MockSavingsVault(usdc);
 
         nvda = new MockStock("NVIDIA", "NVDA", 18, admin);
@@ -93,7 +93,7 @@ contract BasketoorTest is Test {
         assertGt(tsla.balanceOf(alice), 0);
         assertEq(usdc.balanceOf(treasury), 0.1e6);
 
-        (Basketoor.Plan memory p, Basketoor.Leg[] memory legs) = b.getPlan(id);
+        (DCAC.Plan memory p, DCAC.Leg[] memory legs) = b.getPlan(id);
         assertEq(p.buysDone, 1);
         assertEq(p.totalSpent, 20e6);
         assertEq(legs[0].spent, 10e6);
@@ -120,7 +120,7 @@ contract BasketoorTest is Test {
             t += 1 days;
             vm.warp(t);
         }
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertFalse(p.active);
         assertEq(p.buysDone, 3);
         assertEq(usdc.balanceOf(treasury), 0.3e6);
@@ -139,7 +139,7 @@ contract BasketoorTest is Test {
         assertGt(nvda.balanceOf(alice), 0);
         // fee on $10 spent: max($0.05, $0.10) = $0.10
         assertEq(usdc.balanceOf(treasury), 0.1e6);
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.totalSpent, 10e6);
         // the $10 TSLA leg stays in the plan
         assertEq(b.planValue(id), 2 * 20.1e6 - 10.1e6);
@@ -153,7 +153,7 @@ contract BasketoorTest is Test {
         vm.stopPrank();
         assertEq(_run(), 1);
 
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertEq(p.buysDone, 0);
         assertEq(p.skippedRuns, 1);
         assertTrue(p.active);
@@ -189,7 +189,7 @@ contract BasketoorTest is Test {
         _run();
 
         uint256 value = b.planValue(id);
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         uint256 yieldEarned = value - p.principal;
         assertGt(yieldEarned, 0);
 
@@ -215,26 +215,26 @@ contract BasketoorTest is Test {
 
         uint256 before = usdc.balanceOf(alice);
         vm.prank(alice);
-        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 11, type(uint256).max); // 10 buys left of $20 + $0.10
+        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 11, false, type(uint256).max); // 10 buys left of $20 + $0.10
         assertEq(before - usdc.balanceOf(alice), 10 * 20.1e6 - 4 * 20.1e6);
         assertEq(b.planValue(id), 10 * 20.1e6);
 
         vm.prank(alice);
-        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 3, type(uint256).max); // 2 left
+        b.updatePlan(id, "nvda only", tokens, amounts, 1 days, 3, false, type(uint256).max); // 2 left
         assertEq(b.planValue(id), 2 * 20.1e6);
     }
 
     function test_onlyKeeperRuns() public {
         _create(10e6, 10e6, 5, false);
         vm.prank(alice);
-        vm.expectRevert(Basketoor.NotKeeper.selector);
+        vm.expectRevert(DCAC.NotKeeper.selector);
         b.executeDue(10);
     }
 
     function test_onlyOwnerCancels() public {
         uint256 id = _create(10e6, 10e6, 5, false);
         vm.prank(keeper);
-        vm.expectRevert(Basketoor.NotPlanOwner.selector);
+        vm.expectRevert(DCAC.NotPlanOwner.selector);
         b.cancelPlan(id);
     }
 
@@ -246,19 +246,19 @@ contract BasketoorTest is Test {
         amounts[0] = 5e6;
         amounts[1] = 5e6;
         vm.prank(alice);
-        vm.expectRevert(Basketoor.BadLegs.selector);
+        vm.expectRevert(DCAC.BadLegs.selector);
         b.createPlan("dup", tokens, amounts, 1 days, 3, false, false, type(uint256).max);
 
         tokens[1] = address(usdc);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Basketoor.AssetNotEnabled.selector, address(usdc)));
+        vm.expectRevert(abi.encodeWithSelector(DCAC.AssetNotEnabled.selector, address(usdc)));
         b.createPlan("bad", tokens, amounts, 1 days, 3, false, false, type(uint256).max);
     }
 
     function test_underGassedCallRevertsInsteadOfNoop() public {
         _create(10e6, 10e6, 5, false);
         vm.prank(keeper);
-        (bool ok,) = address(b).call{gas: 120_000}(abi.encodeCall(Basketoor.executeDue, (10)));
+        (bool ok,) = address(b).call{gas: 120_000}(abi.encodeCall(DCAC.executeDue, (10)));
         assertFalse(ok);
         assertEq(b.dueCount(), 1);
     }

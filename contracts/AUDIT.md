@@ -1,4 +1,4 @@
-# Basketoor: audit scope and notes
+# DCAC: audit scope and notes
 
 Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZeppelin 5.4.
 
@@ -6,14 +6,16 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 | File | Lines | What |
 |---|---|---|
-| `src/Basketoor.sol` | 578 | Everything: plans, escrow, savings vault accounting, execution, fees, admin |
-| `src/adapters/AerodromeCLAdapter.sol` | 95 | Mainnet venue: swaps directly against owner-set Aerodrome Slipstream pools (where Coinbase stocks are deepest), checks `minOut`, refuses partial fills |
+| `src/DCAC.sol` | 815 | Everything: plans, escrow, savings vault accounting, execution, smart buys (auto-rebalance) allocation, fees, admin |
+| `src/adapters/AerodromeCLAdapter.sol` | 100 | Mainnet venue: swaps directly against owner-set Aerodrome Slipstream pools (where Coinbase stocks are deepest), checks `minOut`, refuses partial fills |
 | `src/adapters/UniswapV3Adapter.sol` | 50 | Alternative venue (SwapRouter02 `exactInput`). Untested, not planned for launch |
+| `src/feeds/PoolTwapFeed.sol` | 82 | Chainlink-shaped price feed from a 30-minute TWAP of an Aerodrome Slipstream pool, for Coinbase stocks without a Chainlink feed |
+| `src/lib/TickMath.sol` | 78 | Uniswap v3 tick math, ported to 0.8 (used by the TWAP feed) |
 | `src/interfaces/*.sol` | 22 | `ISwapAdapter`, the slice of Chainlink's `AggregatorV3Interface` used |
 
 Out of scope: `src/mocks/` (testnet only), `script/`, the keeper and the frontend.
 
-Tests: `forge test` (15 tests). Coverage of `Basketoor.sol`: 83% lines, 52% branches. The adapter has none.
+Tests: `forge test` (50 tests, including `SmartBuys.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
 
 ## Roles and trust
 
@@ -64,6 +66,6 @@ Audit of commit `b14b3cc` by imd.fun ([job](https://explorer.imd.fun/jobs/9a020f
 | 12 | Low | No maximum on what `createPlan` pulls | Fixed: `maxDeposit` on `createPlan`, `maxPull` on `updatePlan`; the app passes the amount it shows |
 | 13 | Info | `updatePlan` tops up while new plans are paused, at old fees | Partly: top-ups revert while paused. Plans keep their creation-time fees (intended) |
 | 14 | Info | Adapter address unchecked | Fixed: must have code (constructor and setter) |
-| 15 | Info | Adapter owner is an unlisted trust root; `setPool` accepts any contract | Fixed: `Ownable2Step`, and `setPool` checks the pool with the Slipstream factory. Listed under Roles: the adapter owner should be the same key as Basketoor's |
+| 15 | Info | Adapter owner is an unlisted trust root; `setPool` accepts any contract | Fixed: `Ownable2Step`, and `setPool` checks the pool with the Slipstream factory. Listed under Roles: the adapter owner should be the same key as DCAC's |
 
 Tests: `forge test` runs 31 tests (15 original, 5 auditor proofs, 11 fix tests). `script/simulate-aerodrome.sh` still fills on live Base state (2026-11-25: NVDAc 99.62%, AAPLc 100.17% of the Chainlink-implied amount).

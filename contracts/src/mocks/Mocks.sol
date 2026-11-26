@@ -131,7 +131,7 @@ contract MockSwapAdapter is ISwapAdapter, Ownable {
 
 /// @notice A USDC savings vault. Yield appears when someone calls `accrue` (minting test USDC into it).
 contract MockSavingsVault is ERC4626 {
-    constructor(IERC20 usdc_) ERC20("Basketoor Test Savings", "bsUSDC") ERC4626(usdc_) {}
+    constructor(IERC20 usdc_) ERC20("DCAC Test Savings", "bsUSDC") ERC4626(usdc_) {}
 
     /// @dev Add `bps` of current assets as yield.
     function accrue(uint256 bps) external {

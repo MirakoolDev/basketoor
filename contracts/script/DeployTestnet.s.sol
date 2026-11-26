@@ -4,11 +4,11 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
-import {Basketoor} from "../src/Basketoor.sol";
+import {DCAC} from "../src/DCAC.sol";
 import {ISwapAdapter} from "../src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter, MockSavingsVault} from "../src/mocks/Mocks.sol";
 
-/// @notice Deploys Basketoor with test USDC, mocks of the ten Coinbase tokenized stocks and five Base crypto
+/// @notice Deploys DCAC with test USDC, mocks of the ten Coinbase tokenized stocks and five Base crypto
 /// tokens, Chainlink-style feeds, a mock venue and a savings vault. Works on Base Sepolia and on a local anvil.
 ///
 ///   forge script script/DeployTestnet.s.sol --rpc-url base_sepolia --broadcast --private-key $DEPLOYER_KEY
@@ -53,7 +53,7 @@ contract DeployTestnet is Script {
         MockUSDC usdc = new MockUSDC();
         MockSwapAdapter venue = new MockSwapAdapter(deployer);
         MockSavingsVault vault = new MockSavingsVault(usdc);
-        Basketoor b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, deployer);
+        DCAC b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, deployer);
         b.setSavingsVault(IERC4626(address(vault)));
         b.setKeeper(keeper, true);
         if (keeper != deployer) b.setKeeper(deployer, true);
@@ -90,7 +90,7 @@ contract DeployTestnet is Script {
             vm.toString(block.chainid),
             ',"startBlock":',
             vm.toString(block.number),
-            ',"basketoor":"',
+            ',"dcac":"',
             vm.toString(address(b)),
             '","usdc":"',
             vm.toString(address(usdc)),
@@ -106,7 +106,7 @@ contract DeployTestnet is Script {
         );
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
         vm.writeFile(path, json);
-        console.log("Basketoor", address(b));
+        console.log("DCAC", address(b));
         console.log("wrote", path);
     }
 }

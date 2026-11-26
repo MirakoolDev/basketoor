@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { basketoorAbi } from "./abi";
+import { dcacAbi } from "./abi";
 import { dep, explorer } from "./config";
 import { useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView } from "./data";
 import { countdown, date, dateTime, every, money, pct, qty, short } from "./format";
@@ -31,7 +31,7 @@ export function PlanDetail({ id }: { id: bigint }) {
     setBusy(true);
     setError(undefined);
     try {
-      await send([{ address: dep.basketoor, abi: basketoorAbi, functionName: "cancelPlan", args: [p.id] }]);
+      await send([{ address: dep.dcac, abi: dcacAbi, functionName: "cancelPlan", args: [p.id] }]);
       setConfirming(false);
     } catch (e) {
       setError((e as { shortMessage?: string }).shortMessage ?? (e as Error).message.split("\n")[0]);
@@ -145,11 +145,14 @@ export function PlanDetail({ id }: { id: bigint }) {
             </Row>
           ))}
           <Row label="Fee per buy">
-            {p.feeBps / 100}% (min {money(usd(p.minFee))})
+            {(p.feeBps + (p.smart ? p.smartFeeBps : 0)) / 100}% (min {money(usd(p.minFee))})
           </Row>
           <Row label="Fees paid">{money(usd(p.totalFees))}</Row>
           <Row label="Savings">{p.savings ? "On" : "Off"}</Row>
-          <Row label="Smart buys" hint="each buy steers toward your target mix">
+          <Row
+            label="Auto-rebalance"
+            hint={`buys more of what fell behind your target mix${p.smartFeeBps ? `, +${p.smartFeeBps / 100}% fee` : ""}`}
+          >
             {p.smart ? "On" : "Off"}
           </Row>
           <Row label="Skipped runs" hint="market closed or price check failed">
@@ -157,7 +160,7 @@ export function PlanDetail({ id }: { id: bigint }) {
           </Row>
           <Row label="Basket ID">
             {explorer ? (
-              <a className="text-brand-ink" href={`${explorer}/address/${dep.basketoor}`} target="_blank" rel="noreferrer">
+              <a className="text-brand-ink" href={`${explorer}/address/${dep.dcac}`} target="_blank" rel="noreferrer">
                 #{p.id.toString()} ↗
               </a>
             ) : (
@@ -244,8 +247,8 @@ function Weights({ p, symbols }: { p: PlanView; symbols: string[] }) {
       <p className="mt-3 text-xs text-muted">
         {breached.length
           ? p.smart
-            ? "Smart buys is on: the next buys put more into what fell behind."
-            : "Turn on smart buys (Modify) to steer the next buys back toward your mix. Nothing is sold."
+            ? "Auto-rebalance is on: the next buys put more into what fell behind, until you're back on target."
+            : "Turn on auto-rebalance (Modify) and the next buys will put more into what fell behind. Nothing is sold."
           : `Every asset is within ${WEIGHT_LIMIT_BPS / 100} points of its target.`}
       </p>
     </Card>

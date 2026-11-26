@@ -72,14 +72,14 @@ export function buildDeployment(roles: Roles, salt: Hex, chainId: number) {
   const usdc = create("test USDC", bytecode.MockUSDC);
   const venue = create("test swap venue", bytecode.MockSwapAdapter, encodeAbiParameters(parseAbiParameters("address"), [owner]));
   const vault = create("test savings vault", bytecode.MockSavingsVault, encodeAbiParameters(parseAbiParameters("address"), [usdc.creates]));
-  const basketoor = create(
-    "Basketoor",
-    bytecode.Basketoor,
+  const dcac = create(
+    "DCAC",
+    bytecode.DCAC,
     encodeAbiParameters(parseAbiParameters("address, address, address, address"), [usdc.creates, venue.creates, treasury, owner]),
   );
-  const b = basketoor.creates;
+  const b = dcac.creates;
 
-  const core: Call[] = [usdc, venue, vault, basketoor, call(b, "Use the savings vault", "setSavingsVault", [vault.creates])];
+  const core: Call[] = [usdc, venue, vault, dcac, call(b, "Use the savings vault", "setSavingsVault", [vault.creates])];
   core.push(call(b, "Allow the owner to run buys", "setKeeper", [owner, true]));
   if (!same(keeper, owner)) core.push(call(b, "Allow the keeper to run buys", "setKeeper", [keeper, true]));
   const batches: Batch[] = [{ title: "Core contracts", calls: core }];
@@ -114,7 +114,7 @@ export function buildDeployment(roles: Roles, salt: Hex, chainId: number) {
   const deployment = (startBlock: number): Deployment => ({
     chainId,
     startBlock,
-    basketoor: b,
+    dcac: b,
     usdc: usdc.creates,
     venue: venue.creates,
     savingsVault: vault.creates,
@@ -130,10 +130,11 @@ const mainnetAbi = parseAbi([
   "function setKeeper(address keeper, bool allowed)",
   "function setAsset(address token, address feed, bool enabled)",
   "function setPool(address tokenIn, address tokenOut, address pool)",
+  "function setFees(uint16 feeBps, uint64 minFee, uint16 yieldFeeBps)",
 ]);
 const MAINNET_ASSETS_PER_BATCH = 5;
 
-/// Base mainnet: the Aerodrome swap adapter, Basketoor on real USDC with the Gauntlet USDC Prime savings vault,
+/// Base mainnet: the Aerodrome swap adapter, DCAC on real USDC with the Gauntlet USDC Prime savings vault,
 /// and every listed asset routed through its Aerodrome pool and priced from Chainlink, or from a 30-minute
 /// pool TWAP feed deployed here when Chainlink has none.
 export function buildMainnetDeployment(roles: Omit<Roles, "priceUpdater">, salt: Hex, assets: MainnetAsset[] = MAINNET_ASSETS) {
@@ -152,12 +153,17 @@ export function buildMainnetDeployment(roles: Omit<Roles, "priceUpdater">, salt:
   const p = (types: string, values: readonly unknown[]) => encodeAbiParameters(parseAbiParameters(types), values as never);
 
   const adapter = create("Aerodrome adapter", bytecode.AerodromeCLAdapter, p("address, address", [MAINNET.aerodromeClFactory, owner]));
-  const basketoor = create("Basketoor", bytecode.Basketoor, p("address, address, address, address", [MAINNET.usdc, adapter.creates, treasury, owner]));
-  const b = basketoor.creates;
+  const dcac = create("DCAC", bytecode.DCAC, p("address, address, address, address", [MAINNET.usdc, adapter.creates, treasury, owner]));
+  const b = dcac.creates;
   const core: Call[] = [
     adapter,
-    basketoor,
+    dcac,
     call(b, "Use Gauntlet USDC Prime for savings", "setSavingsVault", [MAINNET.savingsVault]),
+    call(b, `Set fees: ${MAINNET.fees.feeBps / 100}% per buy, $${Number(MAINNET.fees.minFee) / 1e6} minimum`, "setFees", [
+      MAINNET.fees.feeBps,
+      MAINNET.fees.minFee,
+      MAINNET.fees.yieldFeeBps,
+    ]),
     call(b, "Allow the owner to run buys", "setKeeper", [owner, true]),
   ];
   if (keeper.toLowerCase() !== owner.toLowerCase()) core.push(call(b, "Allow the keeper to run buys", "setKeeper", [keeper, true]));
@@ -198,7 +204,7 @@ export function buildMainnetDeployment(roles: Omit<Roles, "priceUpdater">, salt:
   const deployment = (startBlock: number): Deployment => ({
     chainId: 8453,
     startBlock,
-    basketoor: b,
+    dcac: b,
     usdc: MAINNET.usdc,
     venue: adapter.creates,
     savingsVault: MAINNET.savingsVault,

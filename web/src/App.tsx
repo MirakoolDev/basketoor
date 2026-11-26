@@ -83,7 +83,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <Header />
       {children}
       <footer className="mt-10 text-center text-xs leading-relaxed text-faint">
-        Basketoor on {CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : "a local chain"}.
+        DCAC on {CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : "a local chain"}.
         {dep?.mock && " Test assets priced from Base mainnet Chainlink feeds."}
 {" "}
         <a href="#/about" className="underline underline-offset-2 hover:text-ink">
@@ -103,7 +103,7 @@ function Header() {
     <header className="sticky top-0 z-10 -mx-4 mb-4 flex h-16 items-center justify-between bg-bg px-4">
       <button onClick={() => go("/")} className="flex items-center gap-2">
         <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-full ring-1 ring-line" />
-        <span className="text-lg font-semibold tracking-[-0.02em]">basketoor</span>
+        <span className="text-lg font-semibold tracking-[-0.02em]">DCAC</span>
       </button>
       <div className="flex items-center gap-2">
         <a href="#/about" className="px-1 text-sm text-muted transition-colors duration-150 hover:text-ink">

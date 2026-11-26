@@ -24,7 +24,7 @@ export function Landing() {
               bought on autopilot.
             </h1>
             <p className="mt-5 max-w-md text-[17px] leading-[1.45] text-muted">
-              Build a basket of up to five tokenized stocks and tokens. Pick how much and how often. Basketoor buys them
+              Build a basket of up to five tokenized stocks and tokens. Pick how much and how often. DCAC buys them
               onchain, on schedule, straight into your wallet, and checks every fill against Chainlink.
             </p>
             <div className="mt-8 max-w-sm">
@@ -69,7 +69,7 @@ export function Landing() {
             {[
               ["01", "Build a basket", "Choose up to five assets and a USDC amount for each. Mix NVDA with ETH if you like."],
               ["02", "Set the schedule", "Every hour, day or week, for as many buys as you want. You deposit the whole budget once."],
-              ["03", "Basketoor buys", "Each buy runs automatically onchain. Shares land in your wallet; unspent USDC can earn yield meanwhile."],
+              ["03", "DCAC buys", "Each buy runs automatically onchain. Shares land in your wallet; unspent USDC can earn yield meanwhile."],
             ].map(([n, t, d]) => (
               <div key={n} className="rounded-xl bg-surface p-5">
                 <div className="font-doto text-sm font-bold text-faint">{n}</div>
@@ -114,7 +114,7 @@ export function Landing() {
         <section id="pricing" className="scroll-mt-20 pb-16">
           <h2 className="headline text-[32px] md:text-[40px]">Simple pricing</h2>
           <div className="mt-8 grid gap-3 md:grid-cols-3">
-            <Price big="0.5%" label="per buy" note="Or $0.10, whichever is higher. Only charged on USDC actually spent." />
+            <Price big="0.5%" label="per buy" note="Or $0.10, whichever is higher. +0.25% with auto-rebalance on. Only charged on USDC actually spent." />
             <Price big="10%" label="of savings yield" note="Only if you turn savings on. Taken when the basket ends." />
             <Price big="$0" label="subscription" note="No monthly plan, no exit fee. Stop anytime and get unspent USDC back." />
           </div>
@@ -139,7 +139,7 @@ export function Landing() {
               ],
               [
                 "Who can use it?",
-                "Anyone outside the US. Tokenized stocks aren't available to US persons, and Basketoor isn't investment advice.",
+                "Anyone outside the US. Tokenized stocks aren't available to US persons, and DCAC isn't investment advice.",
               ],
             ].map(([q, a]) => (
               <details key={q} className="group py-4">
@@ -181,7 +181,7 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
         <a href="#/" className="flex items-center gap-2">
           <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-full ring-1 ring-line" />
-          <span className="text-lg font-semibold tracking-[-0.02em]">basketoor</span>
+          <span className="text-lg font-semibold tracking-[-0.02em]">DCAC</span>
         </a>
         <div className="flex items-center gap-2">
           {landing && (
@@ -211,7 +211,7 @@ export function SiteFooter() {
     <footer className="border-t border-line">
       <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-6 text-xs text-faint sm:flex-row sm:justify-between">
         <div>
-          Basketoor on {CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : "a local chain"}.
+          DCAC on {CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : "a local chain"}.
           {dep?.mock && " Test assets priced from Base mainnet Chainlink feeds."}{" "}
           <a href="#/about" className="underline underline-offset-2 hover:text-ink">Contracts & details</a>
         </div>

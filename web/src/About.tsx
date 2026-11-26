@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
 import { createPublicClient, http, parseAbi, type Address, type PublicClient } from "viem";
 import { base } from "viem/chains";
-import { basketoorAbi, erc20Abi } from "./abi";
+import { dcacAbi, erc20Abi } from "./abi";
 import { CHAIN_ID, dep, explorer } from "./config";
 import { useStocks } from "./data";
 import { dateTime, every, money, short } from "./format";
@@ -25,8 +25,8 @@ function useDeployment() {
     refetchInterval: 30_000,
     queryFn: async () => {
       const r = <T,>(functionName: string, args: unknown[] = []) =>
-        pc.readContract({ address: dep.basketoor, abi: basketoorAbi, functionName, args } as never) as Promise<T>;
-      const [owner, treasury, adapter, vault, feeBps, minFee, yieldFeeBps, slip, stale, minI, maxI, maxSkip, minLeg, paused, nextId, due] =
+        pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName, args } as never) as Promise<T>;
+      const [owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, yieldFeeBps, slip, stale, minI, maxI, maxSkip, minLeg, paused, nextId, due] =
         await Promise.all([
           r<Address>("owner"),
           r<Address>("treasury"),
@@ -34,6 +34,7 @@ function useDeployment() {
           r<Address>("savingsVault"),
           r<number>("feeBps"),
           r<bigint>("minFee"),
+          r<number>("smartFeeBps").catch(() => 0),
           r<number>("yieldFeeBps"),
           r<number>("maxSlippageBps"),
           r<bigint>("maxStaleness"),
@@ -46,14 +47,14 @@ function useDeployment() {
           r<bigint>("dueCount"),
         ]);
       const keeperOk = dep.keeper ? await r<boolean>("keepers", [dep.keeper]) : false;
-      const idle = await pc.readContract({ address: dep.usdc, abi: erc20Abi, functionName: "balanceOf", args: [dep.basketoor] });
+      const idle = await pc.readContract({ address: dep.usdc, abi: erc20Abi, functionName: "balanceOf", args: [dep.dcac] });
       let saved = 0n;
       if (vault !== "0x0000000000000000000000000000000000000000") {
-        const shares = await pc.readContract({ address: vault, abi: vaultAbi, functionName: "balanceOf", args: [dep.basketoor] });
+        const shares = await pc.readContract({ address: vault, abi: vaultAbi, functionName: "balanceOf", args: [dep.dcac] });
         saved = await pc.readContract({ address: vault, abi: vaultAbi, functionName: "convertToAssets", args: [shares] });
       }
       return {
-        owner, treasury, adapter, vault, feeBps, minFee, yieldFeeBps, slip, paused, keeperOk,
+        owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, yieldFeeBps, slip, paused, keeperOk,
         stale: Number(stale), minI: Number(minI), maxI: Number(maxI), maxSkip, minLeg,
         plans: Number(nextId) - 1, due: Number(due), held: Number(idle + saved) / 1e6,
       };
@@ -93,9 +94,9 @@ export function About() {
         </aside>
 
         <div className="rise min-w-0 space-y-14">
-          <Section id="overview" eyebrow="ABOUT BASKETOOR" title="How it works, in the open">
+          <Section id="overview" eyebrow="ABOUT DCAC" title="How it works, in the open">
             <p className="text-[17px] leading-[1.5] text-muted">
-              Basketoor is a recurring-buy ("DCA") protocol on Base. You build a basket of up to five tokenized stocks and tokens,
+              DCAC is a recurring-buy ("DCA") protocol on Base. You build a basket of up to five tokenized stocks and tokens,
               deposit the USDC for every buy up front, and an automated keeper executes each buy on schedule. All accounting, price
               checks and fees live in one contract. Everything on this page is read from the chain right now.
             </p>
@@ -117,7 +118,7 @@ export function About() {
               <Spinner />
             ) : (
               <Table>
-                <AddrRow label="Basketoor" what="Plans, escrow, price checks, execution, fees" addr={dep.basketoor} />
+                <AddrRow label="DCAC" what="Plans, escrow, price checks, execution, fees" addr={dep.dcac} />
                 <AddrRow label={dep.mock ? "USDC (test)" : "USDC"} what="What baskets are funded in" addr={dep.usdc} />
                 <AddrRow label="Swap adapter" what={dep.mock ? "Test venue: fills at the oracle price minus 0.2%" : "Aerodrome concentrated-liquidity pools"} addr={d.data.adapter} />
                 <AddrRow label="Savings vault" what="ERC-4626 vault for USDC waiting its turn" addr={d.data.vault} />
@@ -176,7 +177,8 @@ export function About() {
               <Spinner />
             ) : (
               <Table>
-                <KV k="Fee per buy" v={`${d.data.feeBps / 100}% or ${money(Number(d.data.minFee) / 1e6)}, whichever is higher`} note="Capped at 2% in the contract. Locked per basket when it's created." />
+                <KV k="Fee per buy" v={`${d.data.feeBps / 100}% or ${money(Number(d.data.minFee) / 1e6)}, whichever is higher`} note="Capped at 2% in the contract, auto-rebalance included. Locked per basket when it's created." />
+                <KV k="Auto-rebalance" v={`+${d.data.smartFeeBps / 100}% per buy`} note="Only while auto-rebalance is on. Turning it on or off adjusts the basket's budget for the buys left." />
                 <KV k="Savings yield fee" v={`${d.data.yieldFeeBps / 100}% of yield`} note="Capped at 30%. Only on yield, never on principal." />
                 <KV k="Max slippage vs Chainlink" v={`${d.data.slip / 100}%`} note="Capped at 10%. Worse fills are skipped." />
                 <KV k="Max price age" v={every(d.data.stale).replace(/^every /i, "")} note="Older prices (e.g. a closed market) skip that asset." />
@@ -195,7 +197,7 @@ export function About() {
                 ["Wait", "Unspent USDC sits in the contract, or, with savings on, in the ERC-4626 savings vault, tracked per basket by its shares."],
                 ["Trigger", "An automated keeper (KeeperHub) checks dueCount() on a schedule and calls executeDue(). Only authorized keepers can call it, and they can only run baskets that are due."],
                 ["Price", "For each asset the contract reads its feed: Chainlink, or a 30-minute TWAP of its Aerodrome pool. A stale or unusable price skips that asset this round."],
-                ["Split", "Normally each asset gets its set amount. With smart buys on, the same total is split toward whichever assets are furthest under their target share of the basket, valued at those prices. Nothing is ever sold."],
+                ["Split", "Normally each asset gets its set amount. With auto-rebalance on, the same total is split toward whichever assets are furthest under their target share of the basket, valued at those prices, so the basket drifts back to your mix. Nothing is ever sold."],
                 ["Swap", "The asset's USDC goes to the swap adapter, which buys on Aerodrome and sends the tokens straight to your wallet."],
                 ["Verify", "The contract measures your wallet's balance before and after. Less than the oracle price minus the slippage bound and the buy doesn't count."],
                 ["Charge", "The fee is taken only on USDC actually spent. Unused USDC goes back into the basket and the next buy is scheduled."],
@@ -399,7 +401,7 @@ function Role({ who, can, cant }: { who: string; can: string[]; cant: string[] }
 const RUN_GAS: [shape: string, gas: number, perBuy: number][] = [
   ["1 asset", 520_000, 10],
   ["3 assets, savings on (estimate)", 1_900_000, 30], // between the two measured runs
-  ["5 assets, savings and smart buys", 2_940_000, 50],
+  ["5 assets, savings and auto-rebalance", 2_940_000, 50],
 ];
 
 /// The keeper is paid for out of fees: each run's gas cost next to the fee that run earns, at today's gas price and
@@ -421,7 +423,7 @@ function Costs({ feeBps, minFee, maxSkip }: { feeBps?: number; minFee?: bigint; 
     <Section id="costs" title="Who pays the keeper">
       <p className="mb-4 text-sm leading-relaxed text-muted">
         Every buy is sent by a keeper that pays Base gas. Fees go to the treasury, and the treasury keeps the keeper's gas wallet
-        topped up, so the service pays for itself out of what it earns and Basketoor keeps the rest. Here is what one run costs in gas
+        topped up, so the service pays for itself out of what it earns and DCAC keeps the rest. Here is what one run costs in gas
         right now (Base gas {gwei === undefined ? "…" : `${gwei.toFixed(4)} gwei`}
         {eth ? `, ETH at ${money(eth)}` : ""}) next to the fee it earns at the smallest basket of that shape. Base adds an L1 data fee of
         a fraction of a cent per transaction, not shown.

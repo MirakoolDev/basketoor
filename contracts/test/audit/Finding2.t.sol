@@ -7,7 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
-import {Basketoor} from "src/Basketoor.sol";
+import {DCAC} from "src/DCAC.sol";
 import {ISwapAdapter} from "src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter} from "src/mocks/Mocks.sol";
 
@@ -29,7 +29,7 @@ contract IlliquidVault is ERC4626 {
 
 /// One savings plan whose vault cannot pay out must not stop plans that never opted into savings.
 contract ProofVaultBlocksBatch is Test {
-    Basketoor b;
+    DCAC b;
     MockUSDC usdc;
     IlliquidVault vault;
     MockStock stock;
@@ -46,7 +46,7 @@ contract ProofVaultBlocksBatch is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         MockSwapAdapter venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         vault = new IlliquidVault(usdc);
         stock = new MockStock("Apple", "AAPLc", 8, admin);
         feed = new MockFeed(8, 180e8, admin);
@@ -81,7 +81,7 @@ contract ProofVaultBlocksBatch is Test {
         vm.prank(keeper);
         b.executeDue(10); // reverts today: bob's vault.withdraw bubbles up
 
-        (Basketoor.Plan memory p,) = b.getPlan(aliceId);
+        (DCAC.Plan memory p,) = b.getPlan(aliceId);
         assertEq(p.buysDone, 1, "alice's non-savings plan was blocked by the vault");
     }
 }

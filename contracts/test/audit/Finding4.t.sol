@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
-import {Basketoor} from "src/Basketoor.sol";
+import {DCAC} from "src/DCAC.sol";
 import {ISwapAdapter} from "src/interfaces/ISwapAdapter.sol";
 import {MockUSDC, MockStock, MockFeed, MockSwapAdapter} from "src/mocks/Mocks.sol";
 
@@ -11,7 +11,7 @@ import {MockUSDC, MockStock, MockFeed, MockSwapAdapter} from "src/mocks/Mocks.so
 /// A weekly plan opened while the market is closed is therefore attempted at the same closed-market
 /// moment every week and never buys, although the price is usable on five days out of seven.
 contract ProofSkippedRunIsNotRetried is Test {
-    Basketoor b;
+    DCAC b;
     MockUSDC usdc;
     MockStock stock;
     MockFeed feed;
@@ -27,7 +27,7 @@ contract ProofSkippedRunIsNotRetried is Test {
         vm.startPrank(admin);
         usdc = new MockUSDC();
         MockSwapAdapter venue = new MockSwapAdapter(admin);
-        b = new Basketoor(usdc, ISwapAdapter(address(venue)), treasury, admin);
+        b = new DCAC(usdc, ISwapAdapter(address(venue)), treasury, admin);
         stock = new MockStock("Apple", "AAPLc", 8, admin);
         feed = new MockFeed(8, 200e8, admin);
         stock.setMinter(address(venue));
@@ -64,7 +64,7 @@ contract ProofSkippedRunIsNotRetried is Test {
             b.executeDue(10);
         }
 
-        (Basketoor.Plan memory p,) = b.getPlan(id);
+        (DCAC.Plan memory p,) = b.getPlan(id);
         assertGt(p.buysDone, 0, "no buy in four weeks although the price was usable on 20 of the 28 days");
     }
 }
