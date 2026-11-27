@@ -1,6 +1,8 @@
 # DCAC: audit scope and notes
 
-Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZeppelin 5.4.
+Launch commit: `c260bcd` (2026-11-27). Solidity 0.8.28, via-IR, OpenZeppelin 5.4.
+
+Audits: imd.fun audit of `b14b3cc` (2026-11-25) and re-audit of `404e0ce` (2026-11-27), both below. Every finding from both is fixed, taken out of the launch or accepted with a reason; see the tables at the end.
 
 ## Scope
 
@@ -15,7 +17,7 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 Out of scope: `src/mocks/` (testnet only), `script/`, the keeper and the frontend.
 
-Tests: `forge test` (68 tests, including `SmartBuys.t.sol`, `SharedBaskets.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), shared baskets (`createSharedPlan`: the plan's `creator` gets `creatorShareBps` of each buy fee, paid through `_pay` so a blocked creator can't stall the keeper; sharing with yourself records no creator), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
+Tests: `forge test` (68 tests, including `SmartBuys.t.sol`, `SharedBaskets.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), shared baskets (`createSharedPlan`: the plan's `creator` gets `creatorShareBps` of each buy fee, paid through `_pay` so a blocked creator can't stall the keeper; sharing with yourself records no creator), the TWAP feed and the raised gas budget were added after the first imd.fun audit and covered by the re-audit of `404e0ce`. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
 
 ## Roles and trust
 
@@ -72,21 +74,20 @@ Tests: `forge test` runs 31 tests (15 original, 5 auditor proofs, 11 fix tests).
 
 ## imd.fun re-audit (2026-11-27)
 
-Re-audit of commit `404e0ce` by imd.fun ([job](https://explorer.imd.fun/jobs/2b372e3c-5c92-4c05-b62c-ebaaa402a9e2)), four specialists (economics, flow, math, permissions). Fixes and tests are in `test/audit/ReAuditFixes.t.sol`; the auditors' proofs for the starvation and stranded-creator findings are included there as written.
+Re-audit of commit `404e0ce` by imd.fun ([job](https://explorer.imd.fun/jobs/2b372e3c-5c92-4c05-b62c-ebaaa402a9e2)): four specialists (economics, flow, math, permissions), then a judge who reproduced, merged and ranked their findings. Full report in [`audit/imd-reaudit-report.md`](audit/imd-reaudit-report.md): 11 findings, 1 high, 2 medium, 5 low, 3 info.
 
-| Finding | Severity | Outcome |
-|---|---|---|
-| PoolTwapFeed: the pools are thin outside a narrow band (the depth is one provider's position, sometimes pulled), so a short spike moves the 30-minute TWAP and DCAC accepts fills at it | High (all four) | Not listed at launch: mainnet lists only Chainlink-priced assets (`MAINNET_ASSETS` in `web/src/deploy/mainnet.ts`). `PoolTwapFeed` stays in the code, unused, until it has a second check (short vs long window, liquidity floor) |
-| Runs that buy nothing re-queue hourly at the front of `_active`; ~180 $1 plans starve newer plans | Medium | Fixed: `executeDue` scans round robin from a stored cursor, and changing the interval of a plan waiting out a retry no longer pulls it forward |
-| A copier names a second wallet as creator and gets `creatorShareBps` of their own fees back | Medium | Accepted by design: works as a referral discount. The owner can lower `setCreatorShare` if it is abused |
-| Creator = DCAC itself (or USDC) strands the cut | Low | Fixed: those creators are treated as no creator |
-| Smart-buys premium charged on runs that fell back to the plain split | Low | Fixed: `_allocate` reports whether it rebalanced; fallback runs pay the base fee |
-| Top-up under $0.01 into a savings plan reverts (`BadVaultDeposit`) | Low | Fixed: amounts under a cent stay idle in the plan |
-| `GAS_VAULT` (400k) below the launch vault's cost | Low/Info | Raised to 800k (worst case 4.55M per plan; three plans 13.65M). Measured on mainnet state: three 5-asset savings plans run in 6.16M |
-| `AerodromeCLAdapter.MAX_SQRT_RATIO` is not the pool's constant | Info | Fixed |
-| A plan owner can raise `gasFor` between the keeper's estimate and inclusion, reverting the batch | Low | Accepted: the revert is what keeps gas estimates honest (first audit); the keeper retries |
-| PoolTwapFeed reverts when the pool's observation buffer is shorter than the window | Low | Moot at launch (no TWAP assets) |
-| No yield fee when the vault can't pay out at close | Low | Accepted |
-| The $0.10 minimum fee covers the premium on baskets under ~$13 a buy | Info | Accepted |
-| The savings vault is an owner trust root not pinned by `createPlan` | Info | Accepted; listed under Roles and trust |
+**Every finding is resolved in commit `c260bcd`: fixed, taken out of the launch, or accepted with the reason below. No further audit was run on the fixes.** Each fix has a test in [`test/audit/ReAuditFixes.t.sol`](test/audit/ReAuditFixes.t.sol), which includes the auditors' own proofs for findings 3 and 4 as they wrote them; all 68 tests pass. The mainnet dry run (deploy, three 5-asset baskets with savings and auto-rebalance, one of them a shared copy, run in one `executeDue(3)` at 6.16M gas, then cancelled with a full refund) passes on the fixed code.
 
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| 1 | High | `PoolTwapFeed`: one 30-minute mean tick with no outlier, spot or depth check; a few seconds at an extreme tick in a thin pool moves the price bound for TWAP-priced stocks by 10% or more | **Not in the launch.** Mainnet lists only the 15 Chainlink-priced assets (`MAINNET_ASSETS` in `web/src/deploy/mainnet.ts`). No `PoolTwapFeed` is deployed. It stays in the code for later, behind the check the report suggests (median of sub-windows or short vs long mean, plus a minimum in-range liquidity) and a new review |
+| 2 | Medium | `createSharedPlan`: a user takes back `creatorShareBps` of their own fees by naming a second address as creator | **Accepted by design.** It works as a referral discount: the copier never pays more than the normal fee, and the treasury gets at least half of it. If it is abused, the owner lowers the share for new plans with `setCreatorShare` |
+| 3 | Medium | `executeDue` always scans from the front, and runs that buy nothing are free and come back after an hour, so ~180 $1.10 plans on a stale-feed stock starve every later plan | **Fixed.** `executeDue` scans `_active` round robin from a stored cursor (`_due`), and changing the interval of a plan waiting out a retry no longer pulls it forward. Tests: the auditor's proof, `test_scanResumesWhereItStopped`, `test_intervalChangeKeepsRetryWait` |
+| 4 | Low | Creator = the DCAC contract strands the creator's cut | **Fixed.** DCAC itself and the USDC token count as no creator. Tests: the auditor's proof, `test_usdcAsCreatorIsNoCreator` |
+| 5 | Low | The smart-buys premium is charged on runs that fell back to the plain split | **Fixed.** `_allocate` reports whether it rebalanced; a fallback run pays the base fee and the rest of its budget stays in the plan. Tests: `test_noPremiumWhenSmartFellBack`, `test_premiumWhenRebalanced` |
+| 6 | Low | `PoolTwapFeed` doesn't check the pool keeps a window's worth of observations | **Not in the launch** (see 1) |
+| 7 | Low | No yield fee when the vault can't pay out at close | **Accepted.** The owner loses at most 10% of that plan's yield; the user is never charged more |
+| 8 | Low | A sub-cent top-up into a savings plan reverts with `BadVaultDeposit` | **Fixed.** Amounts under $0.01 stay idle in the plan instead of going to the vault. Test: `test_subCentTopUpIntoSavingsPlan` |
+| 9 | Info | The $0.10 minimum fee absorbs the smart-buys premium on baskets up to ~$13 a buy | **Accepted.** Small baskets already pay more than 0.75% through the minimum fee |
+| 10 | Info | `AerodromeCLAdapter.MAX_SQRT_RATIO` is not the pool's constant | **Fixed.** Set to `1461446703485210103287273052203988822378723970342` |
+| 11 | Info | `GAS_VAULT` (400k) is below what the mainnet savings vault costs | **Fixed.** Raised to 800k: worst case 4.55M gas per plan, 13.65M for `executeDue(3)` |

@@ -57,6 +57,17 @@ Instead of running `keeper/`: a KeeperHub workflow on Base Sepolia (84532) or Ba
 Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(3)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 800k with savings, so up to 4.55M) left. Three plans per transaction keeps it under the per-transaction gas cap.
 Then allow the workflow's wallet: `DCAC.setKeeper(<KeeperHub wallet>, true)`.
 
+## Audits
+
+Two audits by [imd.fun](https://imd.fun), both of `contracts/`:
+
+| | Commit | Findings | Report |
+|---|---|---|---|
+| Audit | `b14b3cc` (2026-11-25) | 15: 5 medium, 7 low, 3 info | [`contracts/audit/imd-report.md`](contracts/audit/imd-report.md) |
+| Re-audit | `404e0ce` (2026-11-27) | 11: 1 high, 2 medium, 5 low, 3 info | [`contracts/audit/imd-reaudit-report.md`](contracts/audit/imd-reaudit-report.md) |
+
+Every finding is resolved in the launch commit `c260bcd`: fixed with a test, taken out of the launch, or accepted with a reason. [`contracts/AUDIT.md`](contracts/AUDIT.md) lists each one and what happened to it. The re-audit's one high finding is in the TWAP price feed for stocks without Chainlink; those stocks aren't listed at launch, so only Chainlink-priced assets can be bought.
+
 ## Mainnet: still open
 
 - Which DEX pools hold Coinbase's B20 stocks, and their depth. `UniswapV3Adapter` takes an owner-set path per stock; another venue is one more `ISwapAdapter`.
