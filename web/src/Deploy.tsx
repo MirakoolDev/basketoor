@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAccount, usePublicClient, useWalletClient } from "wagmi";
+import { useAccount, useConfig, usePublicClient, useSwitchChain } from "wagmi";
+import { getWalletClient } from "wagmi/actions";
 import { isAddress, keccak256, toHex, type Address, type Hex } from "viem";
 import { CHAIN_ID, chain, explorer } from "./config";
 import { devWallet } from "./data";
@@ -65,9 +66,24 @@ export function Deploy() {
 }
 
 function Deployer({ owner, mock }: { owner: Address; mock: boolean }) {
-  const { data: connected } = useWalletClient();
-  const wallet = mock && devWallet ? devWallet : connected;
-  const pc = usePublicClient();
+  const config = useConfig();
+  const { chainId: walletChain } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
+  const pc = usePublicClient({ chainId: CHAIN_ID });
+  const wrongChain = !mock && walletChain !== CHAIN_ID;
+
+  /// The signer, on this deployment's chain: asks the wallet to switch networks first if it's on another one.
+  async function signer() {
+    if (mock && devWallet) return devWallet;
+    if (wrongChain) {
+      try {
+        await switchChainAsync({ chainId: CHAIN_ID });
+      } catch {
+        throw new Error(`Your wallet is on another network. Switch it to ${chain.name} and try again.`);
+      }
+    }
+    return getWalletClient(config, { chainId: CHAIN_ID });
+  }
   const [saved, setSaved] = useState<Saved>(() => load(owner) ?? { salt: newSalt(), keeper: owner, priceUpdater: owner, treasury: owner, done: [] });
   const [status, setStatus] = useState<Status>(null);
   const [error, setError] = useState<string>();
@@ -100,7 +116,8 @@ function Deployer({ owner, mock }: { owner: Address; mock: boolean }) {
   const busy = status !== null;
 
   async function runBatch(i: number, batch: Batch): Promise<number | undefined> {
-    if (!wallet || !pc) throw new Error("Connect a wallet first");
+    const wallet = await signer();
+    if (!pc) throw new Error(`Can't reach ${chain.name}. Check your connection and try again.`);
     // Skip contracts that already exist (a retry after a half-finished batch). Settings are safe to send twice.
     const calls = [];
     for (const c of batch.calls) {
@@ -206,6 +223,11 @@ function Deployer({ owner, mock }: { owner: Address; mock: boolean }) {
         })}
       </Card>
 
+      {wrongChain && !finished && (
+        <Card className="text-sm text-muted">
+          Your wallet is on another network. Deploy will ask it to switch to {chain.name} first.
+        </Card>
+      )}
       {error && <Card className="text-sm text-down">{error}</Card>}
 
       {!finished ? (
