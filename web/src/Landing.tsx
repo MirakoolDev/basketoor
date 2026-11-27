@@ -221,6 +221,9 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
           <a href="#/explore" className="px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
             Explore
           </a>
+          <a href="#/indexes" className="px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
+            Indexes
+          </a>
           <a href="#/about" className="hidden px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:block sm:px-3">
             About
           </a>

@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { usePublicClient, useWalletClient, useAccount } from "wagmi";
+import { usePublicClient, useAccount, useConfig, useSwitchChain } from "wagmi";
+import { getWalletClient } from "wagmi/actions";
 import { zeroAddress, type Abi, type Address, type ContractFunctionReturnType, type Hex, type PublicClient } from "viem";
 import { dcacAbi, erc20Abi } from "./abi";
+import { BANKR, bankrAbi } from "./bankr";
 import { createWalletClient, http as httpTransport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
@@ -32,13 +34,13 @@ export const devWallet = isLocal
 export type StockInfo = {
   symbol: string;
   name: string;
-  kind: "stock" | "crypto";
+  kind: "stock" | "crypto" | "index";
   token: Address;
   decimals: number;
   price: number; // USD
   updatedAt: number;
   usable: boolean;
-  pricing: "chainlink" | "chainlink-24/7" | "twap"; // twap: priced from its own Aerodrome pool, not Chainlink
+  pricing: "chainlink" | "chainlink-24/7" | "twap" | "bankr"; // twap: its own Aerodrome pool; bankr: an index's basket value
 };
 
 export type LegView = {
@@ -87,11 +89,12 @@ export function useStocks() {
   return useQuery({
     queryKey: ["stocks"],
     refetchInterval: 30_000,
-    queryFn: async (): Promise<StockInfo[]> =>
-      Promise.all(
+    queryFn: async (): Promise<StockInfo[]> => {
+      const price = (token: Address) => pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [token] });
+      const listed = await Promise.all(
         dep.stocks.map(async (s) => {
-          const [[price, updatedAt, usable], decimals] = await Promise.all([
-            pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [s.token] }),
+          const [[p, updatedAt, usable], decimals] = await Promise.all([
+            price(s.token),
             pc.readContract({ address: s.token, abi: erc20Abi, functionName: "decimals" }),
           ]);
           return {
@@ -100,14 +103,50 @@ export function useStocks() {
             kind: s.kind ?? "stock",
             token: s.token,
             decimals,
-            price: Number(price) / 1e8,
+            price: Number(p) / 1e8,
             updatedAt: Number(updatedAt),
             usable,
             pricing: s.pricing ?? "chainlink",
-          };
+          } satisfies StockInfo;
         }),
-      ),
+      );
+      return [...listed, ...(await listedIndexes(pc, new Set(dep.stocks.map((s) => s.token.toLowerCase()))))];
+    },
   });
+}
+
+/// Bankr index tokens the owner listed on DCAC after launch (anything in DCAC's asset list that isn't in the
+/// deployment file and that Bankr's factory recognises). Read from the chain so a new listing needs no app release.
+async function listedIndexes(pc: PublicClient, known: Set<string>): Promise<StockInfo[]> {
+  if (dep.mock) return [];
+  const all = (await pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "getAssets" }).catch(() => [])) as Address[];
+  const extra = all.filter((a) => !known.has(a.toLowerCase()));
+  const out = await Promise.all(
+    extra.map(async (token): Promise<StockInfo | undefined> => {
+      const isIndex = await pc.readContract({ address: BANKR.factory, abi: bankrAbi, functionName: "isVault", args: [token] }).catch(() => false);
+      if (!isIndex) return undefined;
+      const [[p, updatedAt, usable], symbol, name, decimals] = await Promise.all([
+        pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [token] }),
+        pc.readContract({ address: token, abi: erc20Abi, functionName: "symbol" }),
+        pc.readContract({ address: token, abi: erc20Abi, functionName: "name" }),
+        pc.readContract({ address: token, abi: erc20Abi, functionName: "decimals" }),
+      ]);
+      const [, , , enabled] = await pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "assets", args: [token] });
+      if (!enabled) return undefined;
+      return {
+        symbol,
+        name,
+        kind: "index",
+        token,
+        decimals,
+        price: Number(p) / 1e8,
+        updatedAt: Number(updatedAt),
+        usable,
+        pricing: "bankr",
+      } satisfies StockInfo;
+    }),
+  );
+  return out.filter((x): x is StockInfo => !!x);
 }
 
 export function useProtocol() {
@@ -346,15 +385,53 @@ export function useHistory(id: bigint) {
 
 /// Sends calls in one batch when the wallet supports EIP-5792 (Base Account does: approve + create in one
 /// confirmation), otherwise one transaction at a time.
-export function useSend() {
-  const { data: connected } = useWalletClient();
-  const { connector } = useAccount();
-  // wagmi's mock connector drops `from`, so the local dev wallet signs with anvil's test key itself.
-  const wallet = connector?.id === "mock" && devWallet ? devWallet : connected;
-  const pc = usePublicClient();
+function useSigner() {
+  const config = useConfig();
+  const { connector, isConnected, chainId: walletChain } = useAccount();
+  const { switchChainAsync } = useSwitchChain();
+  const pc = usePublicClient({ chainId: chain.id });
   const qc = useQueryClient();
+
+  /// The signer on this app's chain. A wallet on another network is asked to switch first; without this the
+  /// wallet client for this chain is missing and every send looked like "no wallet".
+  async function signer() {
+    // wagmi's mock connector drops `from`, so the local dev wallet signs with anvil's test key itself.
+    if (connector?.id === "mock" && devWallet) return devWallet;
+    if (!isConnected) throw new Error("Connect a wallet first");
+    if (walletChain !== chain.id) {
+      try {
+        await switchChainAsync({ chainId: chain.id });
+      } catch {
+        throw new Error(`Your wallet is on another network. Switch it to ${chain.name} and try again.`);
+      }
+    }
+    return getWalletClient(config, { chainId: chain.id });
+  }
+  return { pc, qc, signer };
+}
+
+/// Sends prepared transactions (calldata someone else built, like Bankr's index creation) one by one.
+export function useSendTxs() {
+  const { pc, qc, signer } = useSigner();
+  return async (txs: { to: Address; data: Hex; value?: bigint }[], onStep?: (i: number) => void) => {
+    if (!pc) throw new Error(`Can't reach ${chain.name} right now. Try again in a moment.`);
+    const wallet = await signer();
+    for (const [i, t] of txs.entries()) {
+      onStep?.(i);
+      const hash = await (wallet as { sendTransaction: (a: unknown) => Promise<Hex> }).sendTransaction({ to: t.to, data: t.data, value: t.value ?? 0n });
+      const rcpt = await pc.waitForTransactionReceipt({ hash });
+      if (rcpt.status !== "success") throw new Error("Transaction reverted");
+    }
+    await qc.invalidateQueries();
+  };
+}
+
+export function useSend() {
+  const { pc, qc, signer } = useSigner();
+
   return async (calls: { address: Address; abi: Abi; functionName: string; args: readonly unknown[]; value?: bigint }[]) => {
-    if (!wallet || !pc) throw new Error("Connect a wallet first");
+    if (!pc) throw new Error(`Can't reach ${chain.name} right now. Try again in a moment.`);
+    const wallet = await signer();
     const finish = () => qc.invalidateQueries();
     if (calls.length > 1) {
       try {

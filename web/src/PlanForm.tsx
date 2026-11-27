@@ -10,6 +10,7 @@ import { go } from "./App";
 import { useTokenList, type ListToken } from "./tokens";
 import { COINBASE_STOCKS } from "./coinbaseStocks";
 import { basketOf, readShared } from "./share";
+import { Connect } from "./Landing";
 import { short } from "./format";
 
 const MAX = 5;
@@ -41,7 +42,7 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
   const { address: account } = useAccount();
 
   const [selected, setSelected] = useState<Address[]>([]);
-  const [kind, setKind] = useState<"stock" | "crypto">("stock");
+  const [kind, setKind] = useState<"stock" | "crypto" | "index">("stock");
   const [query, setQuery] = useState("");
   const tokenList = useTokenList();
   const [amounts, setAmounts] = useState<Record<string, string>>({});
@@ -247,7 +248,7 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
       <Card>
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex gap-1 rounded-lg bg-surface-2 p-1 ring-1 ring-line">
-            {(["stock", "crypto"] as const).map((k) => {
+            {(stocks.data?.some((s) => s.kind === "index") ? (["stock", "crypto", "index"] as const) : (["stock", "crypto"] as const)).map((k) => {
               const n = selected.filter((t) => stockBy.get(t)?.kind === k).length;
               return (
                 <button
@@ -257,7 +258,7 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
                     kind === k ? "bg-surface text-ink" : "text-muted hover:text-ink"
                   }`}
                 >
-                  {k === "stock" ? "Stocks" : "Crypto"}
+                  {k === "stock" ? "Stocks" : k === "crypto" ? "Crypto" : "Indexes"}
                   {n > 0 && <span className="ml-1.5 text-brand-ink">{n}</span>}
                 </button>
               );
@@ -308,6 +309,7 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
                       <div className="num truncate text-xs text-muted">
                         {s.usable ? money(s.price, { digits: s.price < 1 ? 4 : 2 }) : "Market closed"}
                         {s.pricing === "twap" && <span className="text-faint" title="Priced from its Aerodrome market, not Chainlink"> · market price</span>}
+                        {s.kind === "index" && <span className="text-faint" title="A Bankr index token: one token backed by a basket"> · index</span>}
                       </div>
                     </div>
                     {on && <span className="text-brand-ink">✓</span>}
@@ -592,9 +594,16 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
 
       <BottomBar>
           {error && <p className="mb-2 text-center text-sm text-down">{error}</p>}
-          <Button className="w-full" disabled={!!problem || busy} onClick={submit}>
-            {busy ? "Confirm in wallet…" : (problem ?? (editing ? "Save changes" : `Start basket · ${money(usd(required))}`))}
-          </Button>
+          {account ? (
+            <Button className="w-full" disabled={!!problem || busy} onClick={submit}>
+              {busy ? "Confirm in wallet…" : (problem ?? (editing ? "Save changes" : `Start basket · ${money(usd(required))}`))}
+            </Button>
+          ) : (
+            <>
+              <p className="mb-2 text-center text-sm text-muted">Sign in to copy this basket.</p>
+              <Connect />
+            </>
+          )}
         </BottomBar>
     </div>
   );

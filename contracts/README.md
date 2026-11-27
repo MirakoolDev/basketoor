@@ -10,8 +10,10 @@ Live on Base at [`0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313`](https://basescan.
 | `src/adapters/AerodromeCLAdapter.sol` | Mainnet swap venue: owner-set Aerodrome Slipstream pools |
 | `src/adapters/UniswapV3Adapter.sol` | Alternative venue, unused |
 | `src/feeds/PoolTwapFeed.sol` | 30-minute pool-average price feed, unused at launch |
+| `src/adapters/BankrIndexRouter.sol` | Venue that buys Bankr index tokens through their Uniswap v4 pool and passes every other swap to the Aerodrome adapter. Not deployed yet, not audited |
+| `src/feeds/BankrIndexNavFeed.sol` | A Bankr index's basket value per token, from Bankr's IndexLens. Not deployed yet, not audited |
 | `src/mocks/` | Testnet stand-ins |
-| `test/` | `forge test` (68 tests) |
+| `test/` | `forge test` (73 tests; fork tests run with `BASE_RPC_URL` set) |
 | `script/DeployTestnet.s.sol` | Local / Base Sepolia deploy with mocks |
 
 Audits and how each finding was resolved: [`AUDIT.md`](AUDIT.md).
@@ -20,6 +22,8 @@ Audits and how each finding was resolved: [`AUDIT.md`](AUDIT.md).
 forge build
 forge test
 ```
+
+Bankr index buys against live Base: `BASE_RPC_URL=https://base-rpc.publicnode.com forge test --match-path test/BankrIndex.t.sol` and `bash script/simulate-bankr-index.sh`.
 
 To verify a new deployment, pass the constructor arguments: DCAC takes `(usdc, adapter, treasury, owner)`, the adapter `(aerodromeClFactory, owner)`.
 

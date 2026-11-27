@@ -15,6 +15,8 @@ const pick = {
   MockSavingsVault: "Mocks.sol/MockSavingsVault.json",
   AerodromeCLAdapter: "AerodromeCLAdapter.sol/AerodromeCLAdapter.json",
   PoolTwapFeed: "PoolTwapFeed.sol/PoolTwapFeed.json",
+  BankrIndexRouter: "BankrIndexRouter.sol/BankrIndexRouter.json",
+  BankrIndexNavFeed: "BankrIndexNavFeed.sol/BankrIndexNavFeed.json",
 };
 
 const result = {};

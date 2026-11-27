@@ -15,6 +15,10 @@ export const dcacAbi = parseAbi([
   "function maxSlippageBps() view returns (uint16)",
   "function savingsVault() view returns (address)",
   "function swapAdapter() view returns (address)",
+  "function getAssets() view returns (address[])",
+  "function assets(address token) view returns (address feed, uint8 tokenDecimals, uint8 feedDecimals, bool enabled)",
+  "function setSwapAdapter(address adapter)",
+  "function setAsset(address token, address feed, bool enabled)",
   "function treasury() view returns (address)",
   "function owner() view returns (address)",
   "function maxStaleness() view returns (uint64)",
@@ -52,5 +56,7 @@ export const erc20Abi = parseAbi([
   "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
   "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+  "function name() view returns (string)",
   "function faucet(address to, uint256 amount)",
 ]);

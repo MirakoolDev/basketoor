@@ -5,6 +5,7 @@ import { CHAIN_ID, dep } from "./config";
 import { short } from "./format";
 import { Card, Spinner, ThemeToggle } from "./ui";
 import { Landing } from "./Landing";
+import { CreateIndex, IndexPage, Indexes } from "./Indexes";
 import { About } from "./About";
 import { Explore } from "./Explore";
 import { Home } from "./Home";
@@ -14,13 +15,16 @@ import { PlanDetail } from "./PlanDetail";
 // Loaded only when opened: it carries the contracts' bytecode.
 const Deploy = lazy(() => import("./Deploy").then((m) => ({ default: m.Deploy })));
 
-export type Route = { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "copy"; id: bigint } | { page: "explore" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
+export type Route = { page: "indexes" } | { page: "index-new" } | { page: "index"; address: `0x${string}` } | { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "copy"; id: bigint } | { page: "explore" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
 
 function parse(hash: string): Route {
   const [, a, b, c] = hash.replace(/^#/, "").split("?")[0].split("/");
   if (a === "new") return { page: "new" };
   if (a === "about") return { page: "about" };
   if (a === "explore") return { page: "explore" };
+  if (a === "indexes" && b === "new") return { page: "index-new" };
+  if (a === "indexes" && b && /^0x[0-9a-fA-F]{40}$/.test(b)) return { page: "index", address: b as `0x${string}` };
+  if (a === "indexes") return { page: "indexes" };
   if (a === "b" && b && /^\d+$/.test(b)) return { page: "copy", id: BigInt(b) };
   if (a === "deploy") return { page: "deploy" };
   if (a === "plan" && b && /^\d+$/.test(b)) return c === "edit" ? { page: "edit", id: BigInt(b) } : { page: "plan", id: BigInt(b) };
@@ -65,7 +69,12 @@ export function App() {
 
   if (route.page === "about") return <About />;
   if (route.page === "explore") return <Explore />;
-  if (!isConnected) return <Landing />;
+  if (route.page === "indexes") return <Indexes />;
+  if (route.page === "index") return <IndexPage key={route.address} address={route.address} />;
+  if (route.page === "index-new") return <CreateIndex />;
+  // Shared basket links open without a wallet, so people see the mix before they sign in.
+  const sharedLink = route.page === "copy" || (route.page === "new" && window.location.hash.includes("?"));
+  if (!isConnected && !sharedLink) return <Landing />;
 
   return (
     <Shell>
@@ -114,6 +123,9 @@ function Header() {
       <div className="flex items-center gap-2">
         <a href="#/explore" className="px-1 text-sm text-muted transition-colors duration-150 hover:text-ink">
           Explore
+        </a>
+        <a href="#/indexes" className="px-1 text-sm text-muted transition-colors duration-150 hover:text-ink">
+          Indexes
         </a>
         <a href="#/about" className="px-1 text-sm text-muted transition-colors duration-150 hover:text-ink">
           About

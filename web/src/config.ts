@@ -1,4 +1,4 @@
-import { createConfig, http } from "wagmi";
+import { createConfig, fallback, http } from "wagmi";
 import { base, baseSepolia, foundry } from "wagmi/chains";
 import { baseAccount, injected, mock } from "wagmi/connectors";
 import type { Address, Hex } from "viem";
@@ -7,10 +7,10 @@ import { Attribution } from "ox/erc8021";
 export type Stock = {
   symbol: string;
   name: string;
-  kind?: "stock" | "crypto";
+  kind?: "stock" | "crypto" | "index";
   token: Address;
   feed: Address;
-  pricing?: "chainlink" | "chainlink-24/7" | "twap"; // mainnet: where the price comes from
+  pricing?: "chainlink" | "chainlink-24/7" | "twap" | "bankr"; // mainnet: where the price comes from
   pool?: Address; // mainnet: the Aerodrome pool it is bought through
 };
 export type Deployment = {
@@ -53,8 +53,18 @@ export const wagmiConfig = createConfig({
     injected(),
     ...(isLocal ? [mock({ accounts: [DEV_ACCOUNT], features: { reconnect: true } })] : []),
   ],
-  transports: { [chain.id]: http(import.meta.env.VITE_RPC_URL as string | undefined) } as never,
+  transports: { [chain.id]: fallback(rpcs().map((u) => http(u))) } as never,
 });
+
+/// RPCs to try in order. Base's own public RPC refuses eth_getLogs ("request limit reached"), which left order
+/// history empty, so on Base mainnet a public RPC that serves logs goes first.
+function rpcs(): (string | undefined)[] {
+  const own = import.meta.env.VITE_RPC_URL as string | undefined;
+  const list: (string | undefined)[] = own ? [own] : [];
+  if (CHAIN_ID === 8453) list.push("https://base-rpc.publicnode.com");
+  list.push(undefined); // the chain's default RPC
+  return list;
+}
 
 
 export const FREQUENCIES = [

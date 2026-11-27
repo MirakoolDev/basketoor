@@ -19,7 +19,7 @@ export function StockLogo({
 }: {
   symbol: string;
   token?: Address;
-  kind?: "stock" | "crypto";
+  kind?: "stock" | "crypto" | "index";
   src?: string;
   size?: number;
 }) {

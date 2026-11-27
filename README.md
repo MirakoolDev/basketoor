@@ -6,7 +6,7 @@ Built for Base's *Stocks Maxxing Season*, Programmable Stock Markets track (cust
 
 ## Live on Base
 
-App: **https://dcac.miracleotugo.art**
+App: **https://dcac.fun**
 
 Deployed to Base mainnet on 2026-11-27 (block 62988364) from the audited launch code. Source verified on Basescan and Sourcify.
 
@@ -42,9 +42,23 @@ Everything except the alarm clock:
 
 The keeper can't move anyone's money: it can only trigger a buy that is due, at the plan's amounts, inside the oracle bound. Users can always cancel and withdraw themselves.
 
+## Indexes (built on Bankr)
+
+An index is one token backed by a basket of stocks and crypto it holds. DCAC builds these on [Bankr's index contracts](https://docs.bankr.bot/token-launching/index-tokens), live on Base, instead of writing its own:
+
+- **Create** (`#/indexes/new`): pick 2 to 20 assets and weights, a fee (0.25% to 1% per trade) and a first buy of at least $100. Bankr's API prepares the transactions and the user's wallet signs them, so the user is the index's creator and earns the creator's share of its fee. Bankr keeps 40% of the fee.
+- **Buy, sell, redeem**: through the index's own Uniswap v4 pools, whose hook buys or sells the basket. Anyone can redeem for the basket at any time.
+- **Recurring buys on DCAC**: once the owner lists an index, it can go in a DCAC basket like any stock. Two small contracts do this, with no change to the deployed DCAC:
+  - `BankrIndexRouter` becomes DCAC's venue. Buys of a Bankr index (recognised by Bankr's factory) go through its v4 pool; every other buy is passed unchanged to the Aerodrome adapter.
+  - `BankrIndexNavFeed` gives DCAC the index's basket value per token from Bankr's IndexLens, which prices from Chainlink or Bankr's signed prices, never from the index's own pool. It answers 0 (the leg is skipped) while any basket price is missing.
+  - The owner turns this on from an index's page: deploy the router and `setSwapAdapter`, then per index deploy its feed and `setAsset`. The app finds listed indexes onchain, so a listing needs no app release.
+- **Launch a token on it**: Bankr lets anyone launch a token whose pool is paired with an index, so the creator's pool fees arrive as the index token.
+
+Checked against live Base: `test/BankrIndex.t.sol` (fork, the deployed DCAC buying a crypto index and ETH in one plan) and `script/simulate-bankr-index.sh` (stock indexes, since a fork can't run stock tokens). $100 buys of MAG7, CSUITE and SPACE filled at about 99.45% of basket value, inside DCAC's 1.5% bound. An index with a fee above about 0.5% can fall outside it, so the create page says so.
+
 ## Layout
 
-- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed, unused at launch), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.
+- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed, unused at launch), `src/adapters/BankrIndexRouter.sol` + `src/feeds/BankrIndexNavFeed.sol` (Bankr index buys, see above), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.
 - `keeper/`: Node script that calls `executeDue` and, on testnet, copies real Base mainnet Chainlink prices into the mock feeds. On mainnet a KeeperHub workflow does this instead (below).
 - `web/`: Vite + React + wagmi/viem. Base Account sign-in, EIP-5792 batched approve + create, Base Builder Code attribution (`VITE_BUILDER_CODE`). `#/deploy` (dev server only) deploys everything from your own wallet through the CREATE2 deployer and writes `contracts/deployments/<chainId>.json`; that's how the mainnet deployment was made.
 
