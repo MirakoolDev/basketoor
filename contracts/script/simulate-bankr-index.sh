@@ -16,7 +16,7 @@ run(){ local NAME=$1 INDEX=$2
   local RES; RES=$($C rpc eth_call "{\"from\":\"$FROM\",\"data\":\"$INIT${ARGS:2}\",\"gas\":\"0x1c9c380\"}" latest \
     "{\"$USDC\":{\"stateDiff\":{\"$BAL\":\"$($C to-uint256 100000000)\"}}}" --rpc-url "$R" | tr -d '"')
   node -e "const h='$RES'.slice(2);const out=BigInt('0x'+h.slice(0,64)),nav=BigInt('0x'+h.slice(64,128));
-    const atNav=100n*10n**26n/nav; console.log('$NAME: \$100 ->',(Number(out)/1e18).toFixed(6),'shares | NAV/share \$'+(Number(nav)/1e8).toFixed(4),'| fill vs NAV:',(Number(out*10000n/atNav)/100).toFixed(2)+'%')"
+    const atNav=100n*10n**26n/nav; console.log('$NAME: \$100 ->',(Number(out)/1e18).toFixed(6),'shares | buy price \$'+(Number(nav)/1e8).toFixed(4),'| fill vs buy price:',(Number(out*10000n/atNav)/100).toFixed(2)+'%')"
 }
 run MAG7 0x4a2f6e708868d503fd6401c24dd13bb44136591f
 run CSUITE 0xfbc906144e4919ec075fe2edec2a18583177eb3f

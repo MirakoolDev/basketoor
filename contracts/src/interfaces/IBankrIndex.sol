@@ -39,6 +39,7 @@ interface IIndexFactory {
 interface IIndexHook {
     function poolsOf(address vault) external view returns (PoolKey memory stableKey, PoolKey memory wethKey);
     function buysPaused(address vault) external view returns (bool);
+    function feeBpsOf(address vault) external view returns (uint16);
 }
 
 /// @dev Bankr's IndexLens: read-only views that never revert.

@@ -20,7 +20,7 @@ contract BankrIndexProbe {
             IIndexHook(0x2Fd0ba044Faa96A9d1B0f010C0Dac3F696aA2888),
             usdc
         );
-        BankrIndexNavFeed feed = new BankrIndexNavFeed(IIndexLens(0x0E19BDeB4EF2443413926b9Daa72E484f63BB72b), index);
+        BankrIndexNavFeed feed = new BankrIndexNavFeed(IIndexLens(0x0E19BDeB4EF2443413926b9Daa72E484f63BB72b), IIndexHook(0x2Fd0ba044Faa96A9d1B0f010C0Dac3F696aA2888), index);
         IERC20(usdc).approve(address(router), 100e6);
         uint256 out = router.swap(usdc, index, 100e6, 0, address(this));
         (, int256 nav,,,) = feed.latestRoundData();

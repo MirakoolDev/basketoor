@@ -50,11 +50,11 @@ An index is one token backed by a basket of stocks and crypto it holds. DCAC bui
 - **Buy, sell, redeem**: through the index's own Uniswap v4 pools, whose hook buys or sells the basket. Anyone can redeem for the basket at any time.
 - **Recurring buys on DCAC**: once the owner lists an index, it can go in a DCAC basket like any stock. Two small contracts do this, with no change to the deployed DCAC:
   - `BankrIndexRouter` becomes DCAC's venue. Buys of a Bankr index (recognised by Bankr's factory) go through its v4 pool; every other buy is passed unchanged to the Aerodrome adapter.
-  - `BankrIndexNavFeed` gives DCAC the index's basket value per token from Bankr's IndexLens, which prices from Chainlink or Bankr's signed prices, never from the index's own pool. It answers 0 (the leg is skipped) while any basket price is missing.
+  - `BankrIndexNavFeed` gives DCAC what one index token costs to buy: its basket value from Bankr's IndexLens (priced from Chainlink or Bankr's signed prices, never from the index's own pool) plus the index's fee, which is fixed at creation. DCAC's 1.5% bound then only covers the basket's pool costs, whatever the fee. It answers 0 (the leg is skipped) while any basket price is missing.
   - The owner turns this on from an index's page: deploy the router and `setSwapAdapter`, then per index deploy its feed and `setAsset`. The app finds listed indexes onchain, so a listing needs no app release.
 - **Launch a token on it**: Bankr lets anyone launch a token whose pool is paired with an index, so the creator's pool fees arrive as the index token.
 
-Checked against live Base: `test/BankrIndex.t.sol` (fork, the deployed DCAC buying a crypto index and ETH in one plan) and `script/simulate-bankr-index.sh` (stock indexes, since a fork can't run stock tokens). $100 buys of MAG7, CSUITE and SPACE filled at about 99.45% of basket value, inside DCAC's 1.5% bound. An index with a fee above about 0.5% can fall outside it, so the create page says so.
+Checked against live Base: `test/BankrIndex.t.sol` (fork, the deployed DCAC buying a crypto index and ETH in one plan) and `script/simulate-bankr-index.sh` (stock indexes, since a fork can't run stock tokens). $100 buys of MAG7, CSUITE and SPACE (0.5% fee) filled at about 99.9% of the feed's buy price, and HEAT (1% fee, Bankr's maximum) at 98.8%, all inside DCAC's 1.5% bound.
 
 ## Layout
 

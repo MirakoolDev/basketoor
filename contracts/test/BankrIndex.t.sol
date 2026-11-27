@@ -24,7 +24,8 @@ contract BankrIndexForkTest is Test {
     IIndexFactory constant FACTORY = IIndexFactory(0x49a3A6D33110425099A9f070d22f576f592b46eB);
     IIndexHook constant HOOK = IIndexHook(0x2Fd0ba044Faa96A9d1B0f010C0Dac3F696aA2888);
     IIndexLens constant LENS = IIndexLens(0x0E19BDeB4EF2443413926b9Daa72E484f63BB72b);
-    address constant BASE7 = 0x07CDF072CF8b91eA6d064B6f4A596F39F52F12b1;
+    address constant BASE7 = 0x07CDF072CF8b91eA6d064B6f4A596F39F52F12b1; // 0.50% fee
+    address constant HEAT = 0xa70E48a53F672324CcD064126d9332E6B18072f4; // 1.00% fee, the highest Bankr allows
 
     BankrIndexRouter router;
     BankrIndexNavFeed feed;
@@ -35,7 +36,7 @@ contract BankrIndexForkTest is Test {
         if (bytes(rpc).length == 0) return false;
         vm.createSelectFork(rpc);
         router = new BankrIndexRouter(ISwapAdapter(VENUE), PM, FACTORY, HOOK, USDC);
-        feed = new BankrIndexNavFeed(LENS, BASE7);
+        feed = new BankrIndexNavFeed(LENS, HOOK, BASE7);
         return true;
     }
 
@@ -57,10 +58,25 @@ contract BankrIndexForkTest is Test {
         (, int256 nav,,,) = feed.latestRoundData();
         uint256 atNav = 100e6 * 1e18 * 1e8 / (uint256(nav) * 1e6);
         console.log("shares for $100", out);
-        console.log("fill vs NAV (bps)", out * 10_000 / atNav);
+        console.log("fill vs buy price (bps)", out * 10_000 / atNav);
         assertEq(IERC20(BASE7).balanceOf(alice), out);
         assertEq(IERC20(USDC).balanceOf(address(router)), 0, "no USDC left behind");
         assertGt(out * 10_000 / atNav, 9_850, "fills within DCAC's 1.5% bound");
+    }
+
+    /// The feed prices in the index fee, so even a 1% fee index fills inside DCAC's 1.5% bound.
+    function test_fork_feedIncludesFeeSoHighFeeIndexFits() public {
+        if (!_fork()) return;
+        BankrIndexNavFeed heat = new BankrIndexNavFeed(LENS, HOOK, HEAT);
+        (,, uint256 navE18,) = LENS.navUsdE18(HEAT);
+        (, int256 price,,,) = heat.latestRoundData();
+        assertEq(uint256(price), navE18 * 10_100 / 10_000 / 1e10, "NAV plus the 1% fee");
+        deal(USDC, address(this), 100e6);
+        IERC20(USDC).approve(address(router), 100e6);
+        uint256 out = router.swap(USDC, HEAT, 100e6, 0, alice);
+        uint256 expected = 100e6 * 1e18 * 1e8 / (uint256(price) * 1e6);
+        console.log("HEAT fill vs buy price (bps)", out * 10_000 / expected);
+        assertGt(out * 10_000 / expected, 9_850, "fills within DCAC's 1.5% bound");
     }
 
     function test_fork_routerRefusesBelowMinOut() public {

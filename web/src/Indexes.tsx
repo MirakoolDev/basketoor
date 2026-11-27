@@ -38,7 +38,7 @@ const ROUTER = create2(
   encodeAbiParameters(parseAbiParameters("address, address, address, address, address"), [dep.venue, BANKR.poolManager, BANKR.factory, BANKR.hook, dep.usdc]),
 );
 const navFeed = (index: Address) =>
-  create2(`bankr-index-feed:${index.toLowerCase()}`, bytecode.BankrIndexNavFeed, encodeAbiParameters(parseAbiParameters("address, address"), [BANKR.lens, index]));
+  create2(`bankr-index-feed:${index.toLowerCase()}`, bytecode.BankrIndexNavFeed, encodeAbiParameters(parseAbiParameters("address, address, address"), [BANKR.lens, BANKR.hook, index]));
 
 /// DCAC's owner, whether the index router is DCAC's venue yet, and which tokens are listed.
 function useOwnerState() {
@@ -500,7 +500,7 @@ export function CreateIndex() {
               <Field label="Ticker" hint={symbolOk === false ? "Taken" : symbolOk ? "Available" : undefined}>
                 <input value={symbol} onChange={(e) => setSymbol(e.target.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 10).toUpperCase())} placeholder="CHIPS" className={`${inputCls} font-mono`} />
               </Field>
-              <Field label="Fee per trade" hint="Bankr keeps 40% of it; the rest is yours. DCAC's recurring buys need 0.50% or less.">
+              <Field label="Fee per trade" hint="Paid on every buy and sell. Bankr keeps 40% of it; the rest is yours.">
                 <div className="flex gap-1 rounded-lg bg-surface-2 p-1 ring-1 ring-line">
                   {FEES.map((f) => (
                     <button key={f} onClick={() => setFeeBps(f)} className={`h-8 flex-1 rounded-md text-sm font-medium ${feeBps === f ? "bg-surface text-ink" : "text-muted hover:text-ink"}`}>

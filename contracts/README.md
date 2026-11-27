@@ -11,9 +11,9 @@ Live on Base at [`0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313`](https://basescan.
 | `src/adapters/UniswapV3Adapter.sol` | Alternative venue, unused |
 | `src/feeds/PoolTwapFeed.sol` | 30-minute pool-average price feed, unused at launch |
 | `src/adapters/BankrIndexRouter.sol` | Venue that buys Bankr index tokens through their Uniswap v4 pool and passes every other swap to the Aerodrome adapter. Not deployed yet, not audited |
-| `src/feeds/BankrIndexNavFeed.sol` | A Bankr index's basket value per token, from Bankr's IndexLens. Not deployed yet, not audited |
+| `src/feeds/BankrIndexNavFeed.sol` | A Bankr index's buy price: basket value per token from Bankr's IndexLens plus the index fee. Not deployed yet, not audited |
 | `src/mocks/` | Testnet stand-ins |
-| `test/` | `forge test` (73 tests; fork tests run with `BASE_RPC_URL` set) |
+| `test/` | `forge test` (74 tests; fork tests run with `BASE_RPC_URL` set) |
 | `script/DeployTestnet.s.sol` | Local / Base Sepolia deploy with mocks |
 
 Audits and how each finding was resolved: [`AUDIT.md`](AUDIT.md).
