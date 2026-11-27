@@ -26,7 +26,7 @@ function useDeployment() {
     queryFn: async () => {
       const r = <T,>(functionName: string, args: unknown[] = []) =>
         pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName, args } as never) as Promise<T>;
-      const [owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, yieldFeeBps, slip, stale, minI, maxI, maxSkip, minLeg, paused, nextId, due] =
+      const [owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, creatorShareBps, yieldFeeBps, slip, stale, minI, maxI, maxSkip, minLeg, paused, nextId, due] =
         await Promise.all([
           r<Address>("owner"),
           r<Address>("treasury"),
@@ -35,6 +35,7 @@ function useDeployment() {
           r<number>("feeBps"),
           r<bigint>("minFee"),
           r<number>("smartFeeBps").catch(() => 0),
+          r<number>("creatorShareBps").catch(() => 0),
           r<number>("yieldFeeBps"),
           r<number>("maxSlippageBps"),
           r<bigint>("maxStaleness"),
@@ -54,7 +55,7 @@ function useDeployment() {
         saved = await pc.readContract({ address: vault, abi: vaultAbi, functionName: "convertToAssets", args: [shares] });
       }
       return {
-        owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, yieldFeeBps, slip, paused, keeperOk,
+        owner, treasury, adapter, vault, feeBps, minFee, smartFeeBps, creatorShareBps, yieldFeeBps, slip, paused, keeperOk,
         stale: Number(stale), minI: Number(minI), maxI: Number(maxI), maxSkip, minLeg,
         plans: Number(nextId) - 1, due: Number(due), held: Number(idle + saved) / 1e6,
       };
@@ -179,6 +180,7 @@ export function About() {
               <Table>
                 <KV k="Fee per buy" v={`${d.data.feeBps / 100}% or ${money(Number(d.data.minFee) / 1e6)}, whichever is higher`} note="Capped at 2% in the contract, auto-rebalance included. Locked per basket when it's created." />
                 <KV k="Auto-rebalance" v={`+${d.data.smartFeeBps / 100}% per buy`} note="Only while auto-rebalance is on. Turning it on or off adjusts the basket's budget for the buys left." />
+                <KV k="Shared baskets" v={`${d.data.creatorShareBps / 100}% of the fee to the creator`} note="On baskets opened from someone's shared link, that share of each buy fee goes to whoever made the basket instead of DCAC. Costs the copier nothing extra. Locked per basket." />
                 <KV k="Savings yield fee" v={`${d.data.yieldFeeBps / 100}% of yield`} note="Capped at 30%. Only on yield, never on principal." />
                 <KV k="Max slippage vs Chainlink" v={`${d.data.slip / 100}%`} note="Capped at 10%. Worse fills are skipped." />
                 <KV k="Max price age" v={every(d.data.stale).replace(/^every /i, "")} note="Older prices (e.g. a closed market) skip that asset." />

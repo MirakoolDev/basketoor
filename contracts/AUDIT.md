@@ -6,7 +6,7 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 | File | Lines | What |
 |---|---|---|
-| `src/DCAC.sol` | 815 | Everything: plans, escrow, savings vault accounting, execution, smart buys (auto-rebalance) allocation, fees, admin |
+| `src/DCAC.sol` | 904 | Everything: plans, escrow, savings vault accounting, execution, smart buys (auto-rebalance) allocation, fees, admin |
 | `src/adapters/AerodromeCLAdapter.sol` | 100 | Mainnet venue: swaps directly against owner-set Aerodrome Slipstream pools (where Coinbase stocks are deepest), checks `minOut`, refuses partial fills |
 | `src/adapters/UniswapV3Adapter.sol` | 50 | Alternative venue (SwapRouter02 `exactInput`). Untested, not planned for launch |
 | `src/feeds/PoolTwapFeed.sol` | 82 | Chainlink-shaped price feed from a 30-minute TWAP of an Aerodrome Slipstream pool, for Coinbase stocks without a Chainlink feed |
@@ -15,7 +15,7 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 Out of scope: `src/mocks/` (testnet only), `script/`, the keeper and the frontend.
 
-Tests: `forge test` (50 tests, including `SmartBuys.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
+Tests: `forge test` (59 tests, including `SmartBuys.t.sol`, `SharedBaskets.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), shared baskets (`createSharedPlan`: the plan's `creator` gets `creatorShareBps` of each buy fee, paid through `_pay` so a blocked creator can't stall the keeper; sharing with yourself records no creator), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
 
 ## Roles and trust
 

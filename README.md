@@ -14,6 +14,7 @@ Everything except the alarm clock:
 | The budget, escrowed, optionally earning yield in an ERC-4626 savings vault | `DCAC` |
 | Each buy: due check, Chainlink price check (1.5% max slippage, stale price = market closed = skip), swap, shares to the user's wallet | `DCAC._execute` |
 | Fees: per buy, max(0.5% of what filled, or 0.75% while auto-rebalance is on, and a $0.10 minimum fee), owner-set via `setFees` / `setSmartFee`; minimum buy $1 per asset (`setLimits`); nothing if every leg was skipped; 10% of savings yield | `DCAC` |
+| Shared baskets: a link carries a basket's mix; a plan opened from it (`createSharedPlan`) pays the basket's creator `creatorShareBps` (50% at launch) of each buy fee, at no extra cost to the copier. Owner-set via `setCreatorShare`, fixed per plan | `DCAC` |
 | Average buy price, P&L, buy count | counters per leg + `Bought` events |
 | Order history | `Bought` / `LegSkipped` / `Executed` events |
 | Modify (budget resized to fund exactly the remaining buys) / Terminate (full refund + yield) | `updatePlan` / `cancelPlan` |

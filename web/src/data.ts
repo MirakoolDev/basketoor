@@ -5,6 +5,20 @@ import { dcacAbi, erc20Abi } from "./abi";
 import { createWalletClient, http as httpTransport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
+import { useNow } from "./ui";
+
+/// "Now" on the chain's clock, ticking every `intervalMs`. Countdowns compare against block timestamps, which
+/// can run ahead of the browser's clock (a local chain that was fast-forwarded, or a skewed device clock).
+export function useChainNow(intervalMs = 1000) {
+  const now = useNow(intervalMs);
+  const pc = client();
+  const offset = useQuery({
+    queryKey: ["chainClockOffset"],
+    refetchInterval: 60_000,
+    queryFn: async () => Number((await pc.getBlock()).timestamp) - Math.floor(Date.now() / 1000),
+  });
+  return now + (offset.data ?? 0);
+}
 
 // Anvil's public default account #1 (local chain only).
 export const devWallet = isLocal
@@ -50,6 +64,7 @@ export type PlanView = {
   feeBps: number;
   smartFeeBps: number; // extra fee per buy while smart buys are on
   minFee: bigint;
+  creator: Address; // who shared the basket this copies; zero address = none
   principal: bigint;
   totalSpent: bigint;
   totalFees: bigint;
@@ -101,11 +116,12 @@ export function useProtocol() {
     queryKey: ["protocol"],
     staleTime: Infinity,
     queryFn: async () => {
-      const read = (functionName: "feeBps" | "smartFeeBps" | "minFee" | "yieldFeeBps" | "minLegAmount" | "maxSlippageBps" | "savingsVault") =>
+      const read = (functionName: "feeBps" | "smartFeeBps" | "creatorShareBps" | "minFee" | "yieldFeeBps" | "minLegAmount" | "maxSlippageBps" | "savingsVault") =>
         pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName });
-      const [feeBps, smartFeeBps, minFee, yieldFeeBps, minLegAmount, maxSlippageBps, savingsVault] = await Promise.all([
+      const [feeBps, smartFeeBps, creatorShareBps, minFee, yieldFeeBps, minLegAmount, maxSlippageBps, savingsVault] = await Promise.all([
         read("feeBps"),
         read("smartFeeBps").catch(() => 0), // older deployments have no premium
+        read("creatorShareBps").catch(() => 0), // older deployments have no shared baskets
         read("minFee"),
         read("yieldFeeBps"),
         read("minLegAmount"),
@@ -115,6 +131,7 @@ export function useProtocol() {
       return {
         feeBps: Number(feeBps),
         smartFeeBps: Number(smartFeeBps),
+        creatorShareBps: Number(creatorShareBps),
         minFee: minFee as bigint,
         yieldFeeBps: Number(yieldFeeBps),
         minLegAmount: minLegAmount as bigint,
@@ -147,6 +164,7 @@ async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
     feeBps: p.feeBps,
     smartFeeBps: p.smartFeeBps,
     minFee: p.minFee,
+    creator: p.creator,
     principal: p.principal,
     totalSpent: p.totalSpent,
     totalFees: p.totalFees,
@@ -173,6 +191,19 @@ export function useMyPlans() {
       const plans = await Promise.all([...ids].reverse().map((id) => loadPlan(pc, id)));
       return plans;
     },
+  });
+}
+
+/// USDC the connected wallet has earned from plans opened from its shared baskets.
+export function useCreatorEarned() {
+  const pc = client();
+  const { address } = useAccount();
+  return useQuery({
+    queryKey: ["creatorEarned", address],
+    enabled: !!address,
+    refetchInterval: 60_000,
+    queryFn: () =>
+      pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "creatorEarned", args: [address!] }).catch(() => 0n),
   });
 }
 

@@ -1,17 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
-import { formatEther, maxUint256, parseAbi, type Address } from "viem";
+import { formatEther, maxUint256, parseAbi, zeroAddress, type Address } from "viem";
 import { dcacAbi, erc20Abi } from "./abi";
 import { dep, FREQUENCIES } from "./config";
 import { usePlan, useProtocol, useSend, useStocks, useUsdc, usd } from "./data";
-import { date, money } from "./format";
+import { date, dateTime, every, money } from "./format";
 import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo } from "./ui";
 import { go } from "./App";
 import { useTokenList, type ListToken } from "./tokens";
 import { COINBASE_STOCKS } from "./coinbaseStocks";
+import { readShared } from "./share";
+import { short } from "./format";
 
 const MAX = 5;
-const BUY_PRESETS = [7, 30, 90];
+const DAY = 86400;
+/// How long a basket keeps buying. The contract counts buys, so each becomes floor(length / frequency) buys.
+const RUN_FOR: [seconds: number, label: string][] = [
+  [7 * DAY, "1 week"],
+  [30 * DAY, "1 month"],
+  [91 * DAY, "3 months"],
+  [365 * DAY, "1 year"],
+];
 
 // Paying with ETH: wrap it and swap to USDC through the same Aerodrome adapter and ETH/USDC pool baskets buy
 // ETH with. The swap must return at least the missing USDC, so it sends a little extra ETH; the leftover USDC
@@ -45,6 +54,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [loaded, setLoaded] = useState(false);
+  const [span, setSpan] = useState<number | null>(30 * DAY); // how long to keep buying; null = a typed number of buys
 
   // Prefill when modifying.
   useEffect(() => {
@@ -53,11 +63,33 @@ export function PlanForm({ editId }: { editId?: bigint }) {
     setAmounts(Object.fromEntries(plan.legs.map((l) => [l.token, l.amount > 0n ? String(usd(l.amount)) : "0"])));
     setInterval(plan.interval);
     setBuys(String(plan.maxBuys - plan.buysDone));
+    setSpan(null); // an existing basket shows its buys left
     setName(plan.name);
     setSavings(plan.savings);
     setSmart(plan.smart);
     setLoaded(true);
   }, [plan, loaded]);
+
+  // Opened from a shared basket link: start from its mix. The link's amounts only set the proportions.
+  const shared = useMemo(() => (editing ? undefined : readShared()), [editing]);
+  const sharedLegs = useMemo(
+    () => (shared && stocks.data ? shared.legs.filter((l) => stocks.data!.some((s) => s.token === l.token)) : []),
+    [shared, stocks.data],
+  );
+  const sharedSum = sharedLegs.reduce((s, l) => s + l.usd, 0);
+  useEffect(() => {
+    if (!shared || loaded || !stocks.data) return;
+    setSelected(sharedLegs.map((l) => l.token));
+    setAmounts(Object.fromEntries(sharedLegs.map((l) => [l.token, String(l.usd)])));
+    setInterval(shared.interval);
+    setName(shared.name);
+    setSmart(shared.smart);
+    setLoaded(true);
+  }, [shared, sharedLegs, stocks.data, loaded]);
+  const creator = shared && shared.creator !== zeroAddress && shared.creator.toLowerCase() !== account?.toLowerCase() ? shared.creator : undefined;
+  /// Rewrite every amount so the basket keeps the shared proportions at a new total per buy.
+  const scaleTo = (total: number) =>
+    setAmounts(Object.fromEntries(sharedLegs.map((l) => [l.token, String(Math.round(((total * l.usd) / sharedSum) * 100) / 100)])));
 
   const locked = new Set(plan?.legs.map((l) => l.token) ?? []); // existing legs can be set to 0, not removed
 
@@ -73,7 +105,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
     return { token: t, usd: Number.isFinite(n) ? n : 0, raw: BigInt(Math.round((Number.isFinite(n) ? n : 0) * 1e6)) };
   });
   const perBuy = parsed.reduce((s, p) => s + p.raw, 0n);
-  const buysN = Math.max(0, Math.floor(Number(buys) || 0));
+  const buysN = span !== null ? Math.max(1, Math.floor(span / interval)) : Math.max(0, Math.floor(Number(buys) || 0));
 
   const smartOn = smart && selected.length > 1; // auto-rebalance needs two or more assets
   const smartFeeBps = plan?.smartFeeBps ?? protocol.data?.smartFeeBps ?? 0;
@@ -140,12 +172,12 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           args: [plan.id, name, tokens, amts, BigInt(interval), plan.buysDone + buysN, smartOn, needs] as const, // never pull more than shown
         });
       } else {
-        calls.push({
-          address: dep.dcac,
-          abi: dcacAbi,
-          functionName: "createPlan",
-          args: [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, smartOn, needs] as const, // never pull more than shown
-        });
+        const args = [name || defaultName(tokens.map((t) => stockBy.get(t)?.symbol ?? "")), tokens, amts, BigInt(interval), buysN, savings, smartOn, needs] as const; // never pull more than shown
+        calls.push(
+          creator
+            ? { address: dep.dcac, abi: dcacAbi, functionName: "createSharedPlan", args: [creator, ...args] as const }
+            : { address: dep.dcac, abi: dcacAbi, functionName: "createPlan", args },
+        );
       }
       await send(calls as never);
       go(editing ? `/plan/${editId}` : "/");
@@ -189,8 +221,21 @@ export function PlanForm({ editId }: { editId?: bigint }) {
         <button onClick={() => history.back()} className="grid h-9 w-9 place-items-center rounded-full bg-surface transition-colors duration-150 hover:bg-line" aria-label="Back">
           ←
         </button>
-        <h1 className="headline text-[26px]">{editing ? "Modify basket" : "New basket"}</h1>
+        <h1 className="headline text-[26px]">{editing ? "Modify basket" : shared ? "Copy basket" : "New basket"}</h1>
       </div>
+
+      {shared && (
+        <SharedCard
+          creator={creator}
+          name={shared.name}
+          missing={stocks.data ? shared.legs.length - sharedLegs.length : 0}
+          sum={sharedSum}
+          minTotal={sharedLegs.length ? Math.ceil(Math.max(...sharedLegs.map((l) => (minLeg * sharedSum) / l.usd)) * 100) / 100 : 0}
+          total={usd(perBuy)}
+          onTotal={scaleTo}
+          shareBps={protocol.data?.creatorShareBps ?? 0}
+        />
+      )}
 
       <Card>
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -365,30 +410,60 @@ export function PlanForm({ editId }: { editId?: bigint }) {
           ))}
         </div>
 
-        <div className="mt-5 mb-3 flex items-center justify-between">
-          <div className="font-semibold">{editing ? "Buys left" : "Number of buys"}</div>
-          {buysN > 0 && <div className="text-xs text-muted">last buy ≈ {date(endsAt)}</div>}
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            value={buys}
-            onChange={(e) => setBuys(e.target.value)}
-            className="num h-10 w-24 rounded-lg bg-bg px-3 ring-1 ring-line outline-none focus:ring-brand-ink"
-            aria-label="Number of buys"
-          />
-          {BUY_PRESETS.map((n) => (
+        <div className="mt-5 mb-1 font-semibold">Keep buying for</div>
+        <p className="mb-3 text-xs text-muted">
+          You pay for the whole run up front, and get back whatever isn't spent if you stop early.
+        </p>
+        <div className="grid grid-cols-5 gap-2">
+          {RUN_FOR.map(([secs, label]) => {
+            const on = span === secs;
+            const n = Math.max(1, Math.floor(secs / interval));
+            return (
+              <button
+                key={secs}
+                onClick={() => setSpan(secs)}
+                className={`flex h-14 flex-col items-center justify-center rounded-lg ring-1 ${on ? "bg-surface-2 ring-2 ring-brand-ink" : "bg-surface-2 ring-line"}`}
+              >
+                <span className={`text-sm font-semibold ${on ? "" : "text-muted"}`}>{label}</span>
+                <span className="num text-[11px] text-faint">
+                  {n} {n === 1 ? "buy" : "buys"}
+                </span>
+              </button>
+            );
+          })}
+          {span === null ? (
+            <label className="flex h-14 flex-col items-center justify-center rounded-lg bg-bg ring-2 ring-brand-ink">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                autoFocus={!editing}
+                value={buys}
+                onChange={(e) => setBuys(e.target.value)}
+                className="num w-full bg-transparent text-center text-sm font-semibold outline-none"
+                aria-label="Number of buys"
+              />
+              <span className="text-[11px] text-faint">buys</span>
+            </label>
+          ) : (
             <button
-              key={n}
-              onClick={() => setBuys(String(n))}
-              className={`h-10 flex-1 rounded-lg text-sm ring-1 ${buysN === n ? "bg-surface-2 ring-2 ring-brand-ink" : "bg-surface-2 text-muted ring-line"}`}
+              onClick={() => {
+                setBuys(String(buysN));
+                setSpan(null);
+              }}
+              className="flex h-14 flex-col items-center justify-center rounded-lg bg-surface-2 ring-1 ring-line"
             >
-              {n}
+              <span className="text-sm font-semibold text-muted">Custom</span>
+              <span className="text-[11px] text-faint">set buys</span>
             </button>
-          ))}
+          )}
         </div>
+        {buysN > 0 && perBuy > 0n && (
+          <p className="mt-2 text-xs text-muted">
+            {money(usd(perBuy))} {every(interval)}, {buysN} {buysN === 1 ? "time" : "times"}. The last buy is around{" "}
+            {interval < 86400 ? dateTime(endsAt) : date(endsAt)}.
+          </p>
+        )}
       </Card>
 
       <Card className="space-y-4">
@@ -533,5 +608,61 @@ function UnlistedRow({ t }: { t: ListToken }) {
         {t.address.slice(0, 6)}…{t.address.slice(-4)}
       </a>
     </div>
+  );
+}
+
+/// The top of a form opened from a shared basket: whose mix it is, and one box that scales the whole mix.
+function SharedCard(props: {
+  creator?: Address;
+  name: string;
+  missing: number;
+  sum: number;
+  minTotal: number;
+  total: number;
+  onTotal: (n: number) => void;
+  shareBps: number;
+}) {
+  const [text, setText] = useState(String(props.total || props.sum));
+  useEffect(() => setText(String(Math.round(props.total * 100) / 100)), [props.total]);
+  return (
+    <Card>
+      <div className="font-semibold">{props.name || "Shared basket"}</div>
+      <p className="mt-1 text-sm text-muted">
+        {props.creator ? (
+          <>
+            Shared by <span className="font-mono">{short(props.creator)}</span>. They get {props.shareBps / 100}% of the fee on each buy,
+            out of the fee you'd pay anyway: it costs you nothing extra.
+          </>
+        ) : (
+          "Your own shared basket. Copying it yourself doesn't earn a share."
+        )}
+      </p>
+      {props.missing > 0 && (
+        <p className="mt-2 text-sm text-muted">
+          {props.missing} {props.missing === 1 ? "asset in this basket isn't" : "assets in this basket aren't"} listed here, so the copy leaves{" "}
+          {props.missing === 1 ? "it" : "them"} out.
+        </p>
+      )}
+      <div className="mt-4 mb-1.5 text-sm font-medium">Total per buy</div>
+      <div className="flex items-center rounded-lg bg-bg px-3 ring-1 ring-line focus-within:ring-brand-ink">
+        <span className="text-muted">$</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={props.minTotal}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n > 0) props.onTotal(n);
+          }}
+          className="num h-11 w-full bg-transparent pl-1 text-lg outline-none"
+          aria-label="Total USDC per buy"
+        />
+      </div>
+      <p className="mt-1.5 text-xs text-faint">
+        Split across the assets in the same proportions as the original. At least {money(props.minTotal)}, so every asset gets the $1 minimum.
+      </p>
+    </Card>
   );
 }

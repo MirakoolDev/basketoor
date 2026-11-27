@@ -1,4 +1,5 @@
 import { useConnect } from "wagmi";
+import { Wordmark } from "./Wordmark";
 import { CHAIN_ID, dep, isLocal } from "./config";
 import { useStocks, type StockInfo } from "./data";
 import { money } from "./format";
@@ -180,8 +181,7 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
     <nav className="sticky top-0 z-20 border-b border-line bg-bg">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
         <a href="#/" className="flex items-center gap-2">
-          <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-full ring-1 ring-line" />
-          <span className="text-lg font-semibold tracking-[-0.02em]">DCAC</span>
+          <Wordmark className="h-7 w-auto" />
         </a>
         <div className="flex items-center gap-2">
           {landing && (

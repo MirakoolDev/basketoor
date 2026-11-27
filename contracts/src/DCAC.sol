@@ -26,6 +26,9 @@ import {IAggregatorV3} from "./interfaces/IAggregatorV3.sol";
 /// smart buys are on. Nothing is charged for a buy where every leg was skipped. On close, DCAC keeps
 /// `yieldFeeBps` of the yield the plan earned. All of them are fixed per plan when it is created.
 ///
+/// Shared baskets: a plan opened from someone else's shared basket (`createSharedPlan`) records that person as its
+/// creator, and `creatorShareBps` of every buy fee on it goes to them instead of the treasury. Also fixed per plan.
+///
 /// Smart buys (opt-in per plan): the leg amounts set the basket's target weights, and each buy splits the same
 /// USDC toward whichever stocks are furthest under their weight, valued at the oracle price. It only ever buys,
 /// never sells, so the basket drifts back toward its targets over the following buys.
@@ -83,6 +86,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         uint16 smartFeeBps; // snapshot at creation, charged on top of feeBps while `smart` is on
         uint16 yieldFeeBps; // snapshot at creation
         uint64 minFee; // snapshot at creation
+        address creator; // who shared the basket this plan copies; address(0) = none
+        uint16 creatorShareBps; // snapshot at creation: the creator's share of each buy fee
         IERC4626 vault;
         uint256 shares; // vault shares held for this plan
         uint256 idle; // USDC held for this plan outside the vault
@@ -104,6 +109,7 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     uint64 public minFee = 100_000; // $0.10
     uint16 public smartFeeBps = 25; // +0.25% per buy while smart buys are on
     uint16 public yieldFeeBps = 1_000; // 10% of yield
+    uint16 public creatorShareBps = 5_000; // half of each buy fee on a shared-basket plan goes to its creator
     uint16 public maxSlippageBps = 150; // 1.5% from the oracle price
     uint64 public maxStaleness = 26 hours; // Chainlink stock feeds: 0.5% deviation / 24h heartbeat
     uint64 public minInterval = 1 hours;
@@ -128,6 +134,9 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     mapping(address => uint256) public owed;
     uint256 public totalOwed;
 
+    /// @notice All-time buy fees paid to a basket creator, across every plan opened from their shared baskets.
+    mapping(address => uint256) public creatorEarned;
+
     // ---------------------------------------------------------------- events
 
     event PlanCreated(
@@ -143,6 +152,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     event PaymentDeferred(address indexed to, uint256 amount);
     event Claimed(address indexed from, address indexed to, uint256 amount);
     event Executed(uint256 indexed id, uint32 buyIndex, uint256 spent, uint256 fee, uint64 nextRun);
+    event SharedFrom(uint256 indexed id, address indexed creator);
+    event CreatorPaid(uint256 indexed id, address indexed creator, uint256 amount);
     event SmartBuysSet(uint256 indexed id, bool on);
 
     event AssetSet(address indexed token, address feed, bool enabled);
@@ -193,6 +204,36 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         bool smart,
         uint256 maxDeposit
     ) external nonReentrant returns (uint256 id) {
+        id = _createPlan(address(0), name, tokens, amounts, interval, maxBuys, savings, smart, maxDeposit);
+    }
+
+    /// @notice `createPlan` for a basket someone shared: `creator` gets `creatorShareBps` of each buy fee on this
+    /// plan. Sharing with yourself counts as no creator.
+    function createSharedPlan(
+        address creator,
+        string calldata name,
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        uint64 interval,
+        uint32 maxBuys,
+        bool savings,
+        bool smart,
+        uint256 maxDeposit
+    ) external nonReentrant returns (uint256 id) {
+        id = _createPlan(creator, name, tokens, amounts, interval, maxBuys, savings, smart, maxDeposit);
+    }
+
+    function _createPlan(
+        address creator,
+        string calldata name,
+        address[] calldata tokens,
+        uint256[] calldata amounts,
+        uint64 interval,
+        uint32 maxBuys,
+        bool savings,
+        bool smart,
+        uint256 maxDeposit
+    ) internal returns (uint256 id) {
         if (createPaused) revert CreatePaused();
         if (interval < minInterval || interval > maxInterval) revert BadInterval();
         if (maxBuys == 0) revert BadMaxBuys();
@@ -211,6 +252,10 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         p.minFee = minFee;
         p.yieldFeeBps = yieldFeeBps;
         p.smart = smart;
+        if (creator != address(0) && creator != msg.sender) {
+            p.creator = creator;
+            p.creatorShareBps = creatorShareBps;
+        }
         if (savings && address(savingsVault) != address(0)) {
             p.savings = true;
             p.vault = savingsVault;
@@ -230,6 +275,7 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
 
         emit PlanCreated(id, msg.sender, name, interval, maxBuys, p.savings, deposit);
         if (smart) emit SmartBuysSet(id, true);
+        if (p.creator != address(0)) emit SharedFrom(id, p.creator);
     }
 
     /// @notice Turn smart buys on or off. Changes how future buys are split, not how much they spend, but the
@@ -492,6 +538,13 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         emit ConfigChanged();
     }
 
+    /// @notice The basket creator's share of each buy fee, for new shared-basket plans.
+    function setCreatorShare(uint16 creatorShareBps_) external onlyOwner {
+        if (creatorShareBps_ > BPS) revert BadConfig();
+        creatorShareBps = creatorShareBps_;
+        emit ConfigChanged();
+    }
+
     function setExecutionParams(uint16 maxSlippageBps_, uint64 maxStaleness_, uint32 maxSkippedRuns_)
         external
         onlyOwner
@@ -554,7 +607,13 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
 
         // Normally exactly the fee; less only if the plan holds less (rounding dust, a vault loss).
         uint256 fee = _take(p, _feeFor(spent, _bps(p), p.minFee));
-        _pay(treasury, fee);
+        uint256 cut = p.creator == address(0) ? 0 : fee * p.creatorShareBps / BPS;
+        if (cut != 0) {
+            creatorEarned[p.creator] += cut;
+            _pay(p.creator, cut);
+            emit CreatorPaid(id, p.creator, cut);
+        }
+        _pay(treasury, fee - cut);
         p.buysDone = buyIndex;
         p.skippedRuns = 0;
         p.lastRun = uint64(block.timestamp);

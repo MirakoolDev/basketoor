@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { Wordmark } from "./Wordmark";
 import { useAccount, useDisconnect } from "wagmi";
 import { CHAIN_ID, dep } from "./config";
 import { short } from "./format";
@@ -15,7 +16,7 @@ const Deploy = lazy(() => import("./Deploy").then((m) => ({ default: m.Deploy })
 export type Route = { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
 
 function parse(hash: string): Route {
-  const [, a, b, c] = hash.replace(/^#/, "").split("/");
+  const [, a, b, c] = hash.replace(/^#/, "").split("?")[0].split("/");
   if (a === "new") return { page: "new" };
   if (a === "about") return { page: "about" };
   if (a === "deploy") return { page: "deploy" };
@@ -65,7 +66,7 @@ export function App() {
   return (
     <Shell>
       {route.page === "new" ? (
-        <PlanForm />
+        <PlanForm key={window.location.hash} /> // a new shared-basket link starts a fresh form
       ) : route.page === "edit" ? (
         <PlanForm key={route.id.toString()} editId={route.id} />
       ) : route.page === "plan" ? (
@@ -102,8 +103,7 @@ function Header() {
   return (
     <header className="sticky top-0 z-10 -mx-4 mb-4 flex h-16 items-center justify-between bg-bg px-4">
       <button onClick={() => go("/")} className="flex items-center gap-2">
-        <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-full ring-1 ring-line" />
-        <span className="text-lg font-semibold tracking-[-0.02em]">DCAC</span>
+        <Wordmark className="h-7 w-auto" />
       </button>
       <div className="flex items-center gap-2">
         <a href="#/about" className="px-1 text-sm text-muted transition-colors duration-150 hover:text-ink">

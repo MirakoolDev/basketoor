@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { dcacAbi } from "./abi";
 import { dep, explorer } from "./config";
-import { useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView } from "./data";
+import { useChainNow, useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView } from "./data";
 import { countdown, date, dateTime, every, money, pct, qty, short } from "./format";
-import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo, useNow, valuePlan } from "./ui";
+import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo, valuePlan } from "./ui";
 import { go } from "./App";
+import { shareLink } from "./share";
 
 type Tab = "status" | "orders" | "settings";
 
@@ -18,7 +19,7 @@ export function PlanDetail({ id }: { id: bigint }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const send = useSend();
-  const now = useNow();
+  const now = useChainNow();
 
   if (plan.isLoading || !plan.data) return <Spinner />;
   const p = plan.data;
@@ -55,8 +56,14 @@ export function PlanDetail({ id }: { id: bigint }) {
               <span>{p.buysDone >= p.maxBuys ? "Completed" : "Ended"}</span>
             )}{" "}
             · since {date(p.createdAt)}
+            {p.creator !== "0x0000000000000000000000000000000000000000" && (
+              <>
+                {" "}· copied from <span className="font-mono">{short(p.creator)}</span>
+              </>
+            )}
           </div>
         </div>
+        <ShareButton p={p} />
       </div>
 
       <Card>
@@ -202,6 +209,35 @@ export function PlanDetail({ id }: { id: bigint }) {
         </BottomBar>
       )}
     </div>
+  );
+}
+
+/// Copies a link to this basket's mix. Whoever opens a plan from it pays the basket's creator part of each buy fee:
+/// the original creator if this basket was itself copied, otherwise its owner.
+function ShareButton({ p }: { p: PlanView }) {
+  const [done, setDone] = useState(false);
+  const legs = p.legs.filter((l) => l.amount > 0n).map((l) => ({ token: l.token, usd: usd(l.amount) }));
+  if (!legs.length) return null;
+  const creator = p.creator !== "0x0000000000000000000000000000000000000000" ? p.creator : p.owner;
+  const share = async () => {
+    const url = shareLink({ creator, legs, interval: p.interval, name: p.name, smart: p.smart });
+    try {
+      if (navigator.share && matchMedia("(pointer: coarse)").matches) await navigator.share({ title: p.name || "DCAC basket", url });
+      else await navigator.clipboard.writeText(url);
+      setDone(true);
+      setTimeout(() => setDone(false), 2000);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
+  };
+  return (
+    <button
+      onClick={share}
+      className="h-9 shrink-0 rounded-full bg-surface px-4 text-sm font-medium transition-colors duration-150 hover:bg-line"
+      title="Anyone who opens a basket from this link pays its creator part of each buy fee"
+    >
+      {done ? "Link copied" : "Share"}
+    </button>
   );
 }
 

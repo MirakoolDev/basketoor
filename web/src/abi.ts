@@ -1,7 +1,7 @@
 import { parseAbi } from "viem";
 
 export const dcacAbi = parseAbi([
-  "struct Plan { address owner; uint64 interval; uint64 nextRun; uint64 createdAt; uint64 lastRun; uint32 buysDone; uint32 maxBuys; uint32 skippedRuns; bool active; bool savings; bool smart; uint16 feeBps; uint16 smartFeeBps; uint16 yieldFeeBps; uint64 minFee; address vault; uint256 shares; uint256 idle; uint256 principal; uint256 totalSpent; uint256 totalFees; string name; }",
+  "struct Plan { address owner; uint64 interval; uint64 nextRun; uint64 createdAt; uint64 lastRun; uint32 buysDone; uint32 maxBuys; uint32 skippedRuns; bool active; bool savings; bool smart; uint16 feeBps; uint16 smartFeeBps; uint16 yieldFeeBps; uint64 minFee; address creator; uint16 creatorShareBps; address vault; uint256 shares; uint256 idle; uint256 principal; uint256 totalSpent; uint256 totalFees; string name; }",
   "struct Leg { address token; uint256 amount; uint256 spent; uint256 received; }",
   "function getPlan(uint256 id) view returns (Plan plan, Leg[] legs)",
   "function plansOf(address user) view returns (uint256[])",
@@ -26,6 +26,10 @@ export const dcacAbi = parseAbi([
   "function keepers(address) view returns (bool)",
   "function dueCount() view returns (uint256)",
   "function createPlan(string name, address[] tokens, uint256[] amounts, uint64 interval, uint32 maxBuys, bool savings, bool smart, uint256 maxDeposit) returns (uint256)",
+  "function createSharedPlan(address creator, string name, address[] tokens, uint256[] amounts, uint64 interval, uint32 maxBuys, bool savings, bool smart, uint256 maxDeposit) returns (uint256)",
+  "function creatorShareBps() view returns (uint16)",
+  "function creatorEarned(address) view returns (uint256)",
+  "function setCreatorShare(uint16 creatorShareBps)",
   "function setSmartBuys(uint256 id, bool on, uint256 maxPull)",
   "function smartFeeBps() view returns (uint16)",
   "function setSmartFee(uint16 smartFeeBps)",

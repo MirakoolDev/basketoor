@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { erc20Abi } from "./abi";
 import { dep } from "./config";
-import { useMyPlans, useSend, useStocks, useUsdc, usd, type PlanView, type StockInfo } from "./data";
+import { useChainNow, useCreatorEarned, useMyPlans, useSend, useStocks, useUsdc, usd, type PlanView, type StockInfo } from "./data";
 import { countdown, every, money, pct } from "./format";
-import { Button, Card, LogoStack, Pill, Spinner, useNow, valuePlan } from "./ui";
+import { Button, Card, LogoStack, Pill, Spinner, valuePlan } from "./ui";
 import { go } from "./App";
 
 export function Home() {
+  const earned = useCreatorEarned();
   const plans = useMyPlans();
   const stocks = useStocks();
   const usdc = useUsdc();
@@ -69,6 +70,16 @@ export function Home() {
         )}
       </div>
 
+      {(earned.data ?? 0n) > 0n && (
+        <Card className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold">From your shared baskets</div>
+            <p className="text-sm text-muted">Your share of the buy fees on baskets people opened from your links.</p>
+          </div>
+          <div className="num text-lg font-semibold text-up">{money(usd(earned.data!))}</div>
+        </Card>
+      )}
+
       <div className="flex items-center justify-between pt-2">
         <h2 className="text-lg font-semibold">Your baskets</h2>
         {plans.isFetching && <Spinner />}
@@ -78,7 +89,7 @@ export function Home() {
         <Card className="h-24 animate-pulse" />
       ) : all.length === 0 ? (
         <Card className="py-10 text-center">
-          <img src="/favicon.svg" alt="" className="mx-auto h-10 w-10 rounded-full ring-1 ring-line" />
+          <img src="/favicon.svg" alt="" className="mx-auto h-10 w-10" />
           <div className="mt-2 font-semibold">No baskets yet</div>
           <p className="mx-auto mt-1 max-w-xs text-sm text-muted">
             Make one: choose a few stocks, a frequency and a budget. The first buy happens within minutes.
@@ -96,7 +107,7 @@ export function Home() {
 }
 
 function PlanCard({ plan, stocks }: { plan: PlanView; stocks?: StockInfo[] }) {
-  const now = useNow(15_000);
+  const now = useChainNow(15_000);
   const v = valuePlan(plan, stocks);
   const assets = v.legs.filter((l) => l.amount > 0n || l.received > 0n).map((l) => l.stock);
   const perBuy = plan.legs.reduce((s, l) => s + l.amount, 0n);
