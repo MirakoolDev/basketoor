@@ -6,7 +6,7 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 | File | Lines | What |
 |---|---|---|
-| `src/DCAC.sol` | 904 | Everything: plans, escrow, savings vault accounting, execution, smart buys (auto-rebalance) allocation, fees, admin |
+| `src/DCAC.sol` | 933 | Everything: plans, escrow, savings vault accounting, execution, smart buys (auto-rebalance) allocation, fees, admin |
 | `src/adapters/AerodromeCLAdapter.sol` | 100 | Mainnet venue: swaps directly against owner-set Aerodrome Slipstream pools (where Coinbase stocks are deepest), checks `minOut`, refuses partial fills |
 | `src/adapters/UniswapV3Adapter.sol` | 50 | Alternative venue (SwapRouter02 `exactInput`). Untested, not planned for launch |
 | `src/feeds/PoolTwapFeed.sol` | 82 | Chainlink-shaped price feed from a 30-minute TWAP of an Aerodrome Slipstream pool, for Coinbase stocks without a Chainlink feed |
@@ -15,7 +15,7 @@ Commit: the first commit on `main` (2026-11-25). Solidity 0.8.28, via-IR, OpenZe
 
 Out of scope: `src/mocks/` (testnet only), `script/`, the keeper and the frontend.
 
-Tests: `forge test` (59 tests, including `SmartBuys.t.sol`, `SharedBaskets.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), shared baskets (`createSharedPlan`: the plan's `creator` gets `creatorShareBps` of each buy fee, paid through `_pay` so a blocked creator can't stall the keeper; sharing with yourself records no creator), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
+Tests: `forge test` (68 tests, including `SmartBuys.t.sol`, `SharedBaskets.t.sol` and `PoolTwapFeed.t.sol`). Smart buys and their 0.25% fee premium (`smartFeeBps`, resized budgets on toggle), shared baskets (`createSharedPlan`: the plan's `creator` gets `creatorShareBps` of each buy fee, paid through `_pay` so a blocked creator can't stall the keeper; sharing with yourself records no creator), the TWAP feed and the raised gas budget were added after the imd.fun audit and have not been externally reviewed. Coverage of `DCAC.sol`: 83% lines, 52% branches. The adapter has none.
 
 ## Roles and trust
 
@@ -69,3 +69,24 @@ Audit of commit `b14b3cc` by imd.fun ([job](https://explorer.imd.fun/jobs/9a020f
 | 15 | Info | Adapter owner is an unlisted trust root; `setPool` accepts any contract | Fixed: `Ownable2Step`, and `setPool` checks the pool with the Slipstream factory. Listed under Roles: the adapter owner should be the same key as DCAC's |
 
 Tests: `forge test` runs 31 tests (15 original, 5 auditor proofs, 11 fix tests). `script/simulate-aerodrome.sh` still fills on live Base state (2026-11-25: NVDAc 99.62%, AAPLc 100.17% of the Chainlink-implied amount).
+
+## imd.fun re-audit (2026-11-27)
+
+Re-audit of commit `404e0ce` by imd.fun ([job](https://explorer.imd.fun/jobs/2b372e3c-5c92-4c05-b62c-ebaaa402a9e2)), four specialists (economics, flow, math, permissions). Fixes and tests are in `test/audit/ReAuditFixes.t.sol`; the auditors' proofs for the starvation and stranded-creator findings are included there as written.
+
+| Finding | Severity | Outcome |
+|---|---|---|
+| PoolTwapFeed: the pools are thin outside a narrow band (the depth is one provider's position, sometimes pulled), so a short spike moves the 30-minute TWAP and DCAC accepts fills at it | High (all four) | Not listed at launch: mainnet lists only Chainlink-priced assets (`MAINNET_ASSETS` in `web/src/deploy/mainnet.ts`). `PoolTwapFeed` stays in the code, unused, until it has a second check (short vs long window, liquidity floor) |
+| Runs that buy nothing re-queue hourly at the front of `_active`; ~180 $1 plans starve newer plans | Medium | Fixed: `executeDue` scans round robin from a stored cursor, and changing the interval of a plan waiting out a retry no longer pulls it forward |
+| A copier names a second wallet as creator and gets `creatorShareBps` of their own fees back | Medium | Accepted by design: works as a referral discount. The owner can lower `setCreatorShare` if it is abused |
+| Creator = DCAC itself (or USDC) strands the cut | Low | Fixed: those creators are treated as no creator |
+| Smart-buys premium charged on runs that fell back to the plain split | Low | Fixed: `_allocate` reports whether it rebalanced; fallback runs pay the base fee |
+| Top-up under $0.01 into a savings plan reverts (`BadVaultDeposit`) | Low | Fixed: amounts under a cent stay idle in the plan |
+| `GAS_VAULT` (400k) below the launch vault's cost | Low/Info | Raised to 800k (worst case 4.55M per plan; three plans 13.65M). Measured on mainnet state: three 5-asset savings plans run in 6.16M |
+| `AerodromeCLAdapter.MAX_SQRT_RATIO` is not the pool's constant | Info | Fixed |
+| A plan owner can raise `gasFor` between the keeper's estimate and inclusion, reverting the batch | Low | Accepted: the revert is what keeps gas estimates honest (first audit); the keeper retries |
+| PoolTwapFeed reverts when the pool's observation buffer is shorter than the window | Low | Moot at launch (no TWAP assets) |
+| No yield fee when the vault can't pay out at close | Low | Accepted |
+| The $0.10 minimum fee covers the premium on baskets under ~$13 a buy | Info | Accepted |
+| The savings vault is an owner trust root not pinned by `createPlan` | Info | Accepted; listed under Roles and trust |
+

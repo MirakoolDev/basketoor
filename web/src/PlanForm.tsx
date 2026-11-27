@@ -332,8 +332,8 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
               ))}
             </div>
             <p className="mt-2 text-xs text-faint">
-              Coinbase has issued these on Base, but no onchain market holds enough USDC to buy them at a fair price yet. They get listed
-              once one does.
+              Coinbase has issued these on Base, but DCAC can't yet check their fills against a reliable price: they have no Chainlink feed,
+              and their onchain markets are too thin to price from. They get listed once one of those changes.
             </p>
           </div>
         )}
@@ -357,7 +357,7 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
           </div>
         )}
         {!q && kind === "stock" && (
-          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase. Stocks marked "market price" have no Chainlink feed: they're priced from a 30-minute average of their own Aerodrome market, which can drift from the stock's exchange price. A buy that can't happen (market closed) is retried an hour later. If only part of a basket can buy, say crypto on a weekend, that run still counts as one of your buys and the skipped part's USDC is refunded at the end.</p>
+          <p className="mt-3 text-xs text-faint">Tokenized stocks by Coinbase, each priced by Chainlink.{stocks.data?.some((x) => x.pricing === "twap") && ` Stocks marked "market price" have no Chainlink feed: they're priced from a 30-minute average of their own Aerodrome market, which can drift from the stock's exchange price.`} A buy that can't happen (market closed) is retried an hour later. If only part of a basket can buy, say crypto on a weekend, that run still counts as one of your buys and the skipped part's USDC is refunded at the end.</p>
         )}
       </Card>
 

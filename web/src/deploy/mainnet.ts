@@ -25,7 +25,8 @@ export const MAINNET = {
   fees: { feeBps: 50, minFee: 100_000n, yieldFeeBps: 1_000 }, // 0.5% per buy, $0.10 minimum fee, 10% of savings yield
 } as const;
 
-export const MAINNET_ASSETS: MainnetAsset[] = [
+/// Every candidate, TWAP-priced ones included. See MAINNET_ASSETS for what is listed at launch.
+export const ALL_MAINNET_ASSETS: MainnetAsset[] = [
   { symbol: "NVDA", name: "NVIDIA", kind: "stock", decimals: 8, token: "0xb20000000000000000000078ee7ce2fE4908108C", pool: "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC", chainlink: "0x48D9731AF6cc55b879FE76a4Bd1A6c2C0bDaf944", allHours: true },
   { symbol: "META", name: "Meta Platforms", kind: "stock", decimals: 8, token: "0xb2000000000000000000008bC8786B856E61707C", pool: "0xd072410fa13D242e1d53721Bcf7AF02e3455DC96", chainlink: "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D" },
   { symbol: "AAPL", name: "Apple", kind: "stock", decimals: 8, token: "0xb200000000000000000000C2e324d24d7eEcd1fb", pool: "0xF5FCB9CDAFcE67d50AfEf298F88E709d2B946BA6", chainlink: "0x787f13dEa48Db0897CbCDD985de77809D837F988" },
@@ -67,3 +68,8 @@ export const MAINNET_ASSETS: MainnetAsset[] = [
   { symbol: "ETH", name: "Ether", kind: "crypto", decimals: 18, token: "0x4200000000000000000000000000000000000006", pool: "0x4A7af46bC8aBc00048c6c7920a1488DAF568366c", chainlink: "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70" },
   { symbol: "cbBTC", name: "Coinbase Wrapped BTC", kind: "crypto", decimals: 8, token: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", pool: "0x42609aA1E58C5dD7E5a012DC74118fFf975F0Eac", chainlink: "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D" },
 ];
+
+/// Listed at launch: Chainlink-priced assets only. The TWAP-priced stocks are left off until their feed has a second
+/// check (imd.fun re-audit, Nov 27 2026: their pools are thin outside a narrow band, so a short price spike moves the
+/// 30-minute TWAP enough to make DCAC accept bad fills). PoolTwapFeed stays in the codebase for later.
+export const MAINNET_ASSETS: MainnetAsset[] = ALL_MAINNET_ASSETS.filter((a) => a.chainlink);

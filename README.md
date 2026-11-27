@@ -54,7 +54,7 @@ There are no tokenized stocks on Base Sepolia, so the script deploys the ten Coi
 ### Hosted keeper (KeeperHub)
 
 Instead of running `keeper/`: a KeeperHub workflow on Base Sepolia (84532) or Base (8453):
-Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(3)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 400k with savings, so up to 4.15M) left. Three plans per transaction keeps it under the per-transaction gas cap.
+Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(3)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 800k with savings, so up to 4.55M) left. Three plans per transaction keeps it under the per-transaction gas cap.
 Then allow the workflow's wallet: `DCAC.setKeeper(<KeeperHub wallet>, true)`.
 
 ## Mainnet: still open

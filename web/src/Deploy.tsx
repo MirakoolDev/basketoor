@@ -42,9 +42,7 @@ export function Deploy() {
         <h1 className="text-2xl font-semibold tracking-[-0.02em]">Deploy to {chain.name}</h1>
         {MAINNET ? (
           <p className="mt-1 text-sm text-muted">
-            Deploys DCAC on real USDC, the Aerodrome swap adapter and {MAINNET_ASSETS.length} assets:{" "}
-            {MAINNET_ASSETS.filter((a) => a.chainlink).length} priced by Chainlink and {MAINNET_ASSETS.filter((a) => !a.chainlink).length} by a
-            30-minute Aerodrome TWAP feed deployed here. Savings go to Gauntlet USDC Prime. Your wallet signs everything, owns every contract and
+            Deploys DCAC on real USDC, the Aerodrome swap adapter and {MAINNET_ASSETS.length} assets, all priced by Chainlink. Savings go to Gauntlet USDC Prime. Your wallet signs everything, owns every contract and
             pays the gas (a few dollars at today's Base fees).
           </p>
         ) : (

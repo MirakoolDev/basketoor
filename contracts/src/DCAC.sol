@@ -47,10 +47,11 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     /// @notice Gas budget per plan run: base + per active leg + savings vault. See `gasFor`. Measured on Base
     /// mainnet (eth_simulateV1) against Aerodrome Slipstream pools: ~3.1M for a first 5-leg run with savings and
     /// smart buys, TWAP-priced legs and cold storage included. Single swaps through the tokenized-stock pools have
-    /// been seen at up to ~680k, so each leg is budgeted at 700k.
+    /// been seen at up to ~680k, so each leg is budgeted at 700k. The savings vault is budgeted at 800k (a run makes
+    /// several vault calls; previewRedeem on the launch vault alone is ~300k). Worst case 4.55M per plan.
     uint256 public constant GAS_BASE = 250_000;
     uint256 public constant GAS_PER_LEG = 700_000;
-    uint256 public constant GAS_VAULT = 400_000;
+    uint256 public constant GAS_VAULT = 800_000;
     /// @notice A run that bought nothing is retried this long after (or after one interval, if shorter).
     uint64 public constant RETRY_DELAY = 1 hours;
 
@@ -137,6 +138,9 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     /// @notice All-time buy fees paid to a basket creator, across every plan opened from their shared baskets.
     mapping(address => uint256) public creatorEarned;
 
+    /// @dev Where in `_active` the keeper's next scan starts, so every due plan gets its turn (round robin).
+    uint256 internal _cursor;
+
     // ---------------------------------------------------------------- events
 
     event PlanCreated(
@@ -208,7 +212,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     }
 
     /// @notice `createPlan` for a basket someone shared: `creator` gets `creatorShareBps` of each buy fee on this
-    /// plan. Sharing with yourself counts as no creator.
+    /// plan. Sharing with yourself (or naming DCAC or USDC) counts as no creator. Any other address is accepted:
+    /// naming a second wallet of your own works as a referral discount, by design.
     function createSharedPlan(
         address creator,
         string calldata name,
@@ -252,7 +257,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         p.minFee = minFee;
         p.yieldFeeBps = yieldFeeBps;
         p.smart = smart;
-        if (creator != address(0) && creator != msg.sender) {
+        // No creator for yourself, or for an address that could never move its cut out (it would be stranded).
+        if (creator != address(0) && creator != msg.sender && creator != address(this) && creator != address(usdc)) {
             p.creator = creator;
             p.creatorShareBps = creatorShareBps;
         }
@@ -311,7 +317,9 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         _setLegs(id, tokens, amounts, false);
         p.name = name;
         if (interval != p.interval && p.lastRun != 0) {
-            p.nextRun = uint64(Math.max(p.lastRun + interval, block.timestamp));
+            uint64 next = uint64(Math.max(p.lastRun + interval, block.timestamp));
+            // A plan waiting out a retry keeps its wait: changing the interval can't jump the keeper's queue.
+            if (p.skippedRuns == 0 || next > p.nextRun) p.nextRun = next;
         }
         p.interval = interval;
         p.maxBuys = maxBuys;
@@ -364,11 +372,13 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     /// Reverts with `InsufficientGas` unless `gasFor(id)` is left before each plan, so a gas estimate covers
     /// every plan the call runs and an under-gassed call fails loudly instead of quietly doing part of it.
     /// Keep `maxRuns` small enough that the worst case (`maxRuns` 5-leg savings plans) fits one transaction.
+    /// Scans start where the last one stopped, so plans that keep failing can't hold the front of the queue.
     function executeDue(uint256 maxRuns) external onlyKeeper nonReentrant returns (uint256 ran) {
-        uint256[] memory ids = duePlans(maxRuns);
+        (uint256[] memory ids, uint256[] memory ends) = _due(maxRuns);
         for (uint256 i; i < ids.length; ++i) {
             if (_execute(ids[i])) ++ran;
         }
+        if (ids.length > 0) _cursor = ends[ids.length - 1];
     }
 
     /// @notice Run specific plans. Plans that are not due are ignored. Same gas rule as `executeDue`.
@@ -472,16 +482,31 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         }
     }
 
+    /// @notice The plans `executeDue(maxRuns)` would run now, in order.
     function duePlans(uint256 maxRuns) public view returns (uint256[] memory ids) {
+        (ids,) = _due(maxRuns);
+    }
+
+    /// @dev Up to `maxRuns` due plans, scanning `_active` once round from `_cursor`; `ends[k]` is where the
+    /// scan stands just after `ids[k]`.
+    function _due(uint256 maxRuns) internal view returns (uint256[] memory ids, uint256[] memory ends) {
         uint256 len = _active.length;
-        ids = new uint256[](Math.min(len, maxRuns));
+        uint256 cap = Math.min(len, maxRuns);
+        ids = new uint256[](cap);
+        ends = new uint256[](cap);
         uint256 n;
-        for (uint256 i; i < len && n < ids.length; ++i) {
-            uint256 id = _active[i];
-            if (_plans[id].nextRun <= block.timestamp) ids[n++] = id;
+        uint256 start = len == 0 ? 0 : _cursor % len;
+        for (uint256 k; k < len && n < cap; ++k) {
+            uint256 pos = (start + k) % len;
+            uint256 id = _active[pos];
+            if (_plans[id].nextRun <= block.timestamp) {
+                ids[n] = id;
+                ends[n++] = pos + 1;
+            }
         }
         assembly {
             mstore(ids, n)
+            mstore(ends, n)
         }
     }
 
@@ -596,7 +621,7 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         uint32 buyIndex = p.buysDone + 1;
         uint256 spent;
         Leg[] storage legs = _legs[id];
-        (uint256[] memory prices, uint256[] memory allocs) = _allocate(legs, per, p.smart);
+        (uint256[] memory prices, uint256[] memory allocs, bool rebalanced) = _allocate(legs, per, p.smart);
         for (uint256 i; i < legs.length; ++i) {
             if (allocs[i] == 0) continue;
             if (_buyLeg(id, buyIndex, p.owner, legs[i], allocs[i], prices[i])) spent += allocs[i];
@@ -606,7 +631,9 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
         if (spent == 0) return _skipRun(id, p, false);
 
         // Normally exactly the fee; less only if the plan holds less (rounding dust, a vault loss).
-        uint256 fee = _take(p, _feeFor(spent, _bps(p), p.minFee));
+        // The smart-buys premium only applies to runs that were actually rebalanced; on a fallback run the extra
+        // budget stays in the plan and comes back at the end.
+        uint256 fee = _take(p, _feeFor(spent, rebalanced ? _bps(p) : p.feeBps, p.minFee));
         uint256 cut = p.creator == address(0) ? 0 : fee * p.creatorShareBps / BPS;
         if (cut != 0) {
             creatorEarned[p.creator] += cut;
@@ -690,7 +717,7 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     function _allocate(Leg[] storage legs, uint256 per, bool smart)
         internal
         view
-        returns (uint256[] memory prices, uint256[] memory allocs)
+        returns (uint256[] memory prices, uint256[] memory allocs, bool rebalanced)
     {
         uint256 n = legs.length;
         prices = new uint256[](n);
@@ -703,7 +730,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
             if (usable) prices[i] = price;
             else allPriced = false;
         }
-        if (!smart || !allPriced) return (prices, allocs);
+        if (!smart || !allPriced) return (prices, allocs, false);
+        rebalanced = true;
 
         // deficit = max(0, target - value), target = (holdings + per) * amount / per. Deficits add up to >= per.
         uint256[] memory deficits = new uint256[](n);
@@ -884,7 +912,8 @@ contract DCAC is Ownable2Step, ReentrancyGuard {
     /// coming back from a run) a vault that won't take it leaves it idle in the plan.
     function _put(Plan storage p, uint256 amount, bool strict) internal {
         if (amount == 0) return;
-        if (!p.savings) {
+        // Under a cent stays idle: the vault may mint nothing for it, which would fail the strict check below.
+        if (!p.savings || amount < 10_000) {
             p.idle += amount;
             return;
         }
