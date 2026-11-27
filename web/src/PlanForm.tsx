@@ -9,7 +9,7 @@ import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo } from "./ui";
 import { go } from "./App";
 import { useTokenList, type ListToken } from "./tokens";
 import { COINBASE_STOCKS } from "./coinbaseStocks";
-import { readShared } from "./share";
+import { basketOf, readShared } from "./share";
 import { short } from "./format";
 
 const MAX = 5;
@@ -30,7 +30,7 @@ const GAS_RESERVE = 200_000_000_000_000n; // 0.0002 ETH kept back for gas
 const wethAbi = parseAbi(["function deposit() payable", "function approve(address spender, uint256 amount) returns (bool)"]);
 const adapterAbi = parseAbi(["function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minOut, address recipient) returns (uint256)"]);
 
-export function PlanForm({ editId }: { editId?: bigint }) {
+export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint }) {
   const stocks = useStocks();
   const protocol = useProtocol();
   const usdc = useUsdc();
@@ -71,7 +71,13 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   }, [plan, loaded]);
 
   // Opened from a shared basket link: start from its mix. The link's amounts only set the proportions.
-  const shared = useMemo(() => (editing ? undefined : readShared()), [editing]);
+  // Either a short link to basket #copyId (read from the chain) or a long link carrying the mix.
+  const source = usePlan(copyId ?? 0n);
+  const sourcePlan = copyId !== undefined && source.data && source.data.owner !== zeroAddress ? source.data : undefined;
+  const shared = useMemo(
+    () => (editing ? undefined : copyId !== undefined ? (sourcePlan ? basketOf(sourcePlan) : undefined) : readShared()),
+    [editing, copyId, sourcePlan],
+  );
   const sharedLegs = useMemo(
     () => (shared && stocks.data ? shared.legs.filter((l) => stocks.data!.some((s) => s.token === l.token)) : []),
     [shared, stocks.data],
@@ -214,6 +220,7 @@ export function PlanForm({ editId }: { editId?: bigint }) {
   }, [q, kind, stocks.data]);
 
   if (editing && !plan) return <Spinner />;
+  if (copyId !== undefined && !shared) return source.isLoading ? <Spinner /> : <Card>Basket #{copyId.toString()} not found.</Card>;
 
   return (
     <div className="rise space-y-4">

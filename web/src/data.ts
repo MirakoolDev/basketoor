@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePublicClient, useWalletClient, useAccount } from "wagmi";
-import type { Abi, Address, Hex, PublicClient } from "viem";
+import { zeroAddress, type Abi, type Address, type ContractFunctionReturnType, type Hex, type PublicClient } from "viem";
 import { dcacAbi, erc20Abi } from "./abi";
 import { createWalletClient, http as httpTransport } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -148,6 +148,20 @@ async function loadPlan(pc: PublicClient, id: bigint): Promise<PlanView> {
     pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "planValue", args: [id] }),
     pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "weightsOf", args: [id] }).catch(() => undefined),
   ]);
+  return toView(id, p, legs, value, w);
+}
+
+type GetPlan = ContractFunctionReturnType<typeof dcacAbi, "view", "getPlan">;
+type Plan = GetPlan[0];
+type Leg = GetPlan[1][number];
+
+function toView(
+  id: bigint,
+  p: Plan,
+  legs: readonly Leg[],
+  value: bigint,
+  w?: readonly [readonly bigint[], readonly bigint[], bigint],
+): PlanView {
   return {
     id,
     owner: p.owner,
@@ -204,6 +218,40 @@ export function useCreatorEarned() {
     refetchInterval: 60_000,
     queryFn: () =>
       pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "creatorEarned", args: [address!] }).catch(() => 0n),
+  });
+}
+
+/// A basket on Explore: an original (not a copy) with enough buys to judge, and how many plans copied it.
+export type ExploreBasket = { plan: PlanView; copies: number };
+
+/// Every plan, read straight from the contract (no indexer). Originals with at least `minBuys` buys are listed;
+/// a copy counts toward the basket it came from: same maker, same set of assets.
+export function useExplore(minBuys = 3) {
+  const pc = client();
+  return useQuery({
+    queryKey: ["explore", minBuys],
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<ExploreBasket[]> => {
+      const next = await pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "nextPlanId" });
+      const ids = Array.from({ length: Number(next) - 1 }, (_, i) => BigInt(i + 1));
+      const read = (id: bigint) => ({ address: dep.dcac, abi: dcacAbi, functionName: "getPlan", args: [id] }) as const;
+      const raw: (readonly [Plan, readonly Leg[]])[] = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200);
+        if (pc.chain?.contracts?.multicall3) {
+          const res = await pc.multicall({ contracts: batch.map(read), allowFailure: false });
+          raw.push(...(res as never as (readonly [Plan, readonly Leg[]])[]));
+        } else raw.push(...(await Promise.all(batch.map((id) => pc.readContract(read(id))))));
+      }
+      const plans = raw.map(([p, legs], i) => toView(ids[i], p, legs, 0n));
+      const key = (v: PlanView) => v.legs.map((l) => l.token.toLowerCase()).sort().join();
+      const copies = new Map<string, number>();
+      for (const v of plans)
+        if (v.creator !== zeroAddress) copies.set(`${v.creator.toLowerCase()}|${key(v)}`, (copies.get(`${v.creator.toLowerCase()}|${key(v)}`) ?? 0) + 1);
+      return plans
+        .filter((v) => v.creator === zeroAddress && v.buysDone >= minBuys && v.legs.some((l) => l.amount > 0n))
+        .map((plan) => ({ plan, copies: copies.get(`${plan.owner.toLowerCase()}|${key(plan)}`) ?? 0 }));
+    },
   });
 }
 

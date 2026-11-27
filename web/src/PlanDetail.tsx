@@ -6,7 +6,7 @@ import { useChainNow, useHistory, usePlan, useSend, useStocks, usd, type History
 import { countdown, date, dateTime, every, money, pct, qty, short } from "./format";
 import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo, valuePlan } from "./ui";
 import { go } from "./App";
-import { shareLink } from "./share";
+import { basketLink } from "./share";
 
 type Tab = "status" | "orders" | "settings";
 
@@ -216,11 +216,9 @@ export function PlanDetail({ id }: { id: bigint }) {
 /// the original creator if this basket was itself copied, otherwise its owner.
 function ShareButton({ p }: { p: PlanView }) {
   const [done, setDone] = useState(false);
-  const legs = p.legs.filter((l) => l.amount > 0n).map((l) => ({ token: l.token, usd: usd(l.amount) }));
-  if (!legs.length) return null;
-  const creator = p.creator !== "0x0000000000000000000000000000000000000000" ? p.creator : p.owner;
+  if (!p.legs.some((l) => l.amount > 0n)) return null;
   const share = async () => {
-    const url = shareLink({ creator, legs, interval: p.interval, name: p.name, smart: p.smart });
+    const url = basketLink(p.id);
     try {
       if (navigator.share && matchMedia("(pointer: coarse)").matches) await navigator.share({ title: p.name || "DCAC basket", url });
       else await navigator.clipboard.writeText(url);

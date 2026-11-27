@@ -63,6 +63,9 @@ export function Home() {
         <Button className="flex-1" onClick={() => go("/new")}>
           + New basket
         </Button>
+        <Button variant="ghost" onClick={() => go("/explore")}>
+          Explore
+        </Button>
         {dep.mock && (
           <Button variant="ghost" onClick={faucet} disabled={busy}>
             {busy ? "Minting…" : "Get test USDC"}

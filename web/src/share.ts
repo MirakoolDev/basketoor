@@ -1,10 +1,27 @@
 import { getAddress, isAddress, zeroAddress, type Address } from "viem";
+import type { PlanView } from "./data";
 
 /// A shared basket travels in the link: who made it, the mix (each asset's dollars per buy in the original, which
 /// sets the proportions), how often, and its name. Nothing about it is stored onchain until someone opens a plan
 /// from it, and then only the creator's address, so they get their share of that plan's buy fees.
 export type SharedBasket = { creator: Address; legs: { token: Address; usd: number }[]; interval: number; name: string; smart: boolean };
 
+/// The short link to copy basket #id: the app reads its mix from the chain.
+export const basketLink = (id: bigint) => `${window.location.origin}${window.location.pathname}#/b/${id}`;
+
+/// A plan as a basket to copy. Its creator is whoever made the mix: the original maker if this plan was itself
+/// copied, otherwise its owner.
+export function basketOf(p: PlanView): SharedBasket {
+  return {
+    creator: p.creator !== zeroAddress ? p.creator : p.owner,
+    legs: p.legs.filter((l) => l.amount > 0n).map((l) => ({ token: l.token, usd: Number(l.amount) / 1e6 })),
+    interval: p.interval,
+    name: p.name,
+    smart: p.smart,
+  };
+}
+
+/// The long form, carrying the whole mix in the link. Still read (see `readShared`); `basketLink` is what the app hands out.
 export function shareLink(b: SharedBasket): string {
   const q = new URLSearchParams({
     from: b.creator,
