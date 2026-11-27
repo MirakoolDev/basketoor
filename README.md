@@ -4,6 +4,26 @@
 
 Built for Base's *Stocks Maxxing Season*, Programmable Stock Markets track (custom portfolios).
 
+## Live on Base
+
+App: **https://dcac-alpha.vercel.app**
+
+Deployed to Base mainnet on 2026-11-27 (block 62988364) from the audited launch code. Source verified on Basescan and Sourcify.
+
+| Contract | Address |
+|---|---|
+| DCAC | [`0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313`](https://basescan.org/address/0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313#code) |
+| Aerodrome adapter | [`0x27826d88468904cF97C2DcE28E344A16E3693645`](https://basescan.org/address/0x27826d88468904cF97C2DcE28E344A16E3693645#code) |
+| USDC | [`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`](https://basescan.org/address/0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) |
+| Savings vault (Gauntlet USDC Prime) | [`0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61`](https://basescan.org/address/0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61) |
+| Keeper (KeeperHub wallet) | [`0x3DAb104D8A1338Bb728310453DeBb6f2dc9D2Ef9`](https://basescan.org/address/0x3DAb104D8A1338Bb728310453DeBb6f2dc9D2Ef9) |
+| Owner | [`0x420944b441715E34Dd672AE0Eb4526A7AD7d1EEF`](https://basescan.org/address/0x420944b441715E34Dd672AE0Eb4526A7AD7d1EEF) |
+| Treasury | [`0x85eb79DBCc50eB3DA0Ee10460109991E863d2666`](https://basescan.org/address/0x85eb79DBCc50eB3DA0Ee10460109991E863d2666) |
+
+15 assets are listed, each priced by Chainlink: NVDA, GOOGL and TSLA (24/7 feeds), META, AAPL, AMZN, MSFT, MSTR, SNDK, SPCX, ANT, CRCL, INTC, ETH and cbBTC. Every token, feed and Aerodrome pool is in [`contracts/deployments/8453.json`](contracts/deployments/8453.json), and the app's About page reads them live from the contract.
+
+Launch settings: 0.5% per buy (min $0.10), +0.25% with auto-rebalance, 50% of the fee to the creator on shared baskets, 10% of savings yield, 1.5% max slippage against Chainlink, $1 minimum per asset.
+
 ## What's onchain
 
 Everything except the alarm clock:
@@ -24,9 +44,11 @@ The keeper can't move anyone's money: it can only trigger a buy that is due, at 
 
 ## Layout
 
-- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/UniswapV3Adapter.sol` (mainnet venue), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`.
-- `keeper/`: Node script that calls `executeDue` and, on testnet, copies real Base mainnet Chainlink prices into the mock feeds.
-- `web/`: Vite + React + wagmi/viem. Base Account sign-in, EIP-5792 batched approve + create, Base Builder Code attribution (`VITE_BUILDER_CODE`).
+- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed, unused at launch), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.
+- `keeper/`: Node script that calls `executeDue` and, on testnet, copies real Base mainnet Chainlink prices into the mock feeds. On mainnet a KeeperHub workflow does this instead (below).
+- `web/`: Vite + React + wagmi/viem. Base Account sign-in, EIP-5792 batched approve + create, Base Builder Code attribution (`VITE_BUILDER_CODE`). `#/deploy` (dev server only) deploys everything from your own wallet through the CREATE2 deployer and writes `contracts/deployments/<chainId>.json`; that's how the mainnet deployment was made.
+
+Web env: `VITE_CHAIN_ID` (8453 for Base), `VITE_RPC_URL` (optional; defaults to Base's public RPC), `VITE_BUILDER_CODE`.
 
 ## Run locally
 
@@ -53,9 +75,9 @@ There are no tokenized stocks on Base Sepolia, so the script deploys the ten Coi
 
 ### Hosted keeper (KeeperHub)
 
-Instead of running `keeper/`: a KeeperHub workflow on Base Sepolia (84532) or Base (8453):
-Schedule `*/5 * * * *` → Read Contract `dueCount()` → Condition `> 0` → Write Contract `executeDue(3)`. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 800k with savings, so up to 4.55M) left. Three plans per transaction keeps it under the per-transaction gas cap.
-Then allow the workflow's wallet: `DCAC.setKeeper(<KeeperHub wallet>, true)`.
+Mainnet runs on a KeeperHub workflow, "DCAC Keeper (Base)", from the keeper wallet above (gas sponsored by KeeperHub):
+Schedule `*/10 * * * *` → Read Contract `dueCount()` → Condition `duecount.result.n > 0` → (true) Write Contract `executeDue(3)`. Read the count from `result.n`: the step's output is an object, so comparing the whole output never fires. A normal gas estimate is enough: `executeDue` reverts unless each plan it runs has its `gasFor(id)` budget (250k + 700k per asset + 800k with savings, so up to 4.55M) left. Three plans per transaction keeps it under the per-transaction gas cap.
+The same workflow works on Base Sepolia (84532); allow its wallet with `DCAC.setKeeper(<KeeperHub wallet>, true)` (the mainnet deploy did this already).
 
 ## Audits
 
@@ -68,8 +90,10 @@ Two audits by [imd.fun](https://imd.fun), both of `contracts/`:
 
 Every finding is resolved in the launch commit `c260bcd`: fixed with a test, taken out of the launch, or accepted with a reason. [`contracts/AUDIT.md`](contracts/AUDIT.md) lists each one and what happened to it. The re-audit's one high finding is in the TWAP price feed for stocks without Chainlink; those stocks aren't listed at launch, so only Chainlink-priced assets can be bought.
 
-## Mainnet: still open
+## Notes
 
-- Which DEX pools hold Coinbase's B20 stocks, and their depth. `UniswapV3Adapter` takes an owner-set path per stock; another venue is one more `ISwapAdapter`.
+- Swaps go through owner-set Aerodrome Slipstream pools, where Coinbase's B20 stocks are deepest. Another venue is one more `ISwapAdapter`.
+- Coinbase stocks without a Chainlink feed can be listed later with `PoolTwapFeed`; none are at launch (see the re-audit's high finding in `contracts/AUDIT.md`).
 - B20 transfer policies: a blocked recipient makes that leg skip (its USDC stays in the plan).
+- No timelock on owner settings yet; existing baskets keep their fee terms whatever the owner changes.
 - US persons are excluded in the app; the contract itself is permissionless.

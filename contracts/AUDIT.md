@@ -2,6 +2,8 @@
 
 Launch commit: `c260bcd` (2026-11-27). Solidity 0.8.28, via-IR, OpenZeppelin 5.4.
 
+Deployed from that code to Base: DCAC `0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313`, Aerodrome adapter `0x27826d88468904cF97C2DcE28E344A16E3693645`. Both are verified on Basescan and Sourcify as exact matches of this source.
+
 Audits: imd.fun audit of `b14b3cc` (2026-11-25) and re-audit of `404e0ce` (2026-11-27), both below. Every finding from both is fixed, taken out of the launch or accepted with a reason; see the tables at the end.
 
 ## Scope

@@ -135,9 +135,9 @@ export function About() {
           <Section id="assets" title="Assets & price feeds">
             <p className="mb-4 text-sm text-muted">
               Only assets the owner has listed with a price feed can be bought, and every fill is checked against it. Where Chainlink
-              has a feed, that's the price (NVDA, GOOGL and TSLA use Chainlink's 24/7 feeds, so they buy on weekends). Coinbase stocks
-              without a Chainlink feed are priced from a 30-minute time-weighted average of their own Aerodrome pool: the onchain
-              market price, which can drift from the stock's exchange price.
+              has a feed, that's the price (NVDA, GOOGL and TSLA use Chainlink's 24/7 feeds, so they buy on weekends). At launch only assets
+              with a Chainlink feed are listed. The contract can also price a stock from a 30-minute time-weighted average of its own
+              Aerodrome pool, for Coinbase stocks Chainlink doesn't cover yet; none are listed that way today.
             </p>
             {!stocks.data ? (
               <Spinner />
@@ -238,7 +238,8 @@ export function About() {
             </div>
             <p className="mt-4 text-sm leading-relaxed text-muted">
               The owner choosing price feeds and the swap adapter is the main trust assumption: a wrong feed would make the price
-              check meaningless. A timelock on those settings is planned before mainnet.
+              check meaningless. There's no timelock on those settings yet; every change emits an onchain event, and existing baskets
+              keep their fee terms.
             </p>
           </Section>
 
@@ -249,11 +250,12 @@ export function About() {
               A simulation against live Base state on Nov 23, 2026 filled a $100 buy at 100.36% (NVDA) and 100.23% (AAPL) of the
               Chainlink-implied amount. On Nov 25 the whole mainnet deployment (38 stocks, ETH and cbBTC, the Gauntlet USDC Prime
               savings vault) was dry-run against live Base with eth_simulateV1, including a five-asset smart basket buying NVDA, AAPL,
-              PLTR, ETH and cbBTC and then being cancelled for a refund.
+              PLTR, ETH and cbBTC and then being cancelled for a refund. DCAC went live on Base on Nov 27 with the 15 assets that have
+              Chainlink feeds; its contracts are verified on Basescan and Sourcify.
             </p>
             <Table>
               {[
-                ["NVDAc", "0xb20000000000000000000078ee7ce2fE4908108C", "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC", "0x04689a41629776563E6822F76f2e57D148d28513"],
+                ["NVDAc", "0xb20000000000000000000078ee7ce2fE4908108C", "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC", "0x48D9731AF6cc55b879FE76a4Bd1A6c2C0bDaf944"],
                 ["AAPLc", "0xb200000000000000000000C2e324d24d7eEcd1fb", "0xF5FCB9CDAFcE67d50AfEf298F88E709d2B946BA6", "0x787f13dEa48Db0897CbCDD985de77809D837F988"],
               ].map(([sym, token, pool, feed]) => (
                 <div key={sym} className="grid gap-2 py-3 sm:grid-cols-[100px_1fr] sm:items-center">
@@ -271,11 +273,11 @@ export function About() {
           <Section id="risks" title="Known limitations">
             <ul className="space-y-2 text-sm leading-relaxed text-muted">
               {[
-                "No manual audit yet. An automated audit by imd.fun found 15 issues: 13 are fixed, 1 partly, and 1 is accepted by design (see AUDIT.md in the repo).",
-                "Stocks without a Chainlink feed are checked against a 30-minute average of their own Aerodrome pool. It can't be moved within a block, but someone holding the pool price off for half an hour could shift it, and it tracks the token's onchain price, not the exchange's.",
+                "No manual audit yet. Two automated audits by imd.fun (an audit and a re-audit) found 26 issues between them; each is fixed, kept out of the launch, or accepted with a reason (see AUDIT.md in the repo).",
+                "Only Chainlink-priced assets are listed at launch. The pool-average price feed for stocks without Chainlink is in the contracts but unused; a pool average can't be moved within a block, but someone holding the pool price off for half an hour could shift it.",
                 "Swaps can be sandwiched up to the slippage bound (1.5%). The price check caps the damage; it doesn't remove it.",
                 "There's no Base sequencer-uptime check yet; a stale price during an outage is still bounded by the max price age.",
-                "Chainlink's market-hours stock feeds don't update while markets are closed, so a weekend buy can use Friday's close, within the max price age. 24/7 feeds and TWAP-priced assets keep tracking the market.",
+                "Chainlink's market-hours stock feeds don't update while markets are closed, so a weekend buy can use Friday's close, within the max price age. NVDA, GOOGL and TSLA use 24/7 feeds and keep tracking the market.",
                 "Fee-on-transfer and rebasing tokens aren't supported.",
                 "Tokenized stocks aren't available to US persons. Nothing here is investment advice.",
               ].map((t) => (

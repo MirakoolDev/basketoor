@@ -81,6 +81,34 @@ export function Landing() {
           </div>
         </section>
 
+        {/* Shared baskets */}
+        <section className="pb-16">
+          <div className="rounded-2xl bg-surface p-6 md:p-10">
+            <div className="font-doto text-sm font-bold tracking-wider text-muted">SHARED BASKETS</div>
+            <h2 className="headline mt-3 max-w-xl text-[32px] md:text-[40px]">Build an index. Earn when it's copied.</h2>
+            <p className="mt-3 max-w-xl text-muted">
+              Every basket has a link. When someone starts their own basket from yours, you get half of the fee on each of their
+              buys, paid in USDC as it happens. It costs them nothing extra.
+            </p>
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {[
+                ["Your mix, their schedule", "Copiers keep your weights and pick their own amount and frequency. It's their basket, in their wallet."],
+                ["Paid on every buy", "50% of each buy fee goes to the basket's creator, onchain, for as long as the copy runs."],
+                ["A public track record", "Baskets with three or more buys show up on Explore, ranked by return so far."],
+              ].map(([t, d]) => (
+                <div key={t} className="rounded-xl bg-bg p-5 ring-1 ring-line">
+                  <div className="font-semibold tracking-[-0.01em]">{t}</div>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">{d}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm font-medium">
+              <a href="#/explore" className="underline-offset-4 hover:underline">Explore baskets →</a>
+              <a href="#start" className="underline-offset-4 hover:underline">Build your own →</a>
+            </div>
+          </div>
+        </section>
+
         {/* Why */}
         <section className="pb-16">
           <h2 className="headline text-[32px] md:text-[40px]">Built to be trusted with a schedule</h2>
@@ -157,8 +185,8 @@ export function Landing() {
         {/* CTA */}
         <section className="mb-16 rounded-2xl bg-surface p-6 md:flex md:items-center md:justify-between md:p-10">
           <div>
-            <h2 className="headline text-[32px]">Start your first basket</h2>
-            <p className="mt-2 text-muted">It takes about a minute.</p>
+            <h2 className="headline text-[32px]">Stop timing the market.</h2>
+            <p className="mt-2 text-muted">Pick your stocks once. DCAC does the buying. It takes about a minute.</p>
           </div>
           <a
             href="#start"
