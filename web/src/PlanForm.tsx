@@ -481,8 +481,25 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
                 Savings <Pill tone="brand">earns yield</Pill>
               </div>
               <div className="mt-0.5 text-sm text-muted">
-                USDC waiting for its turn sits in a savings vault. DCAC keeps {(protocol.data?.yieldFeeBps ?? 1000) / 100}% of the
-                yield.
+                {dep.mock ? (
+                  "USDC waiting for its turn sits in a savings vault."
+                ) : (
+                  <>
+                    USDC waiting for its turn goes into{" "}
+                    <a
+                      href={`https://app.morpho.org/base/vault/${dep.savingsVault}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-ink underline underline-offset-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Gauntlet USDC Prime
+                    </a>
+                    , a Morpho vault that lends it to borrowers who post more collateral than they borrow. The rate varies; it's
+                    taken out for each buy.
+                  </>
+                )}{" "}
+                DCAC keeps {(protocol.data?.yieldFeeBps ?? 1000) / 100}% of the yield.
               </div>
             </div>
             <input

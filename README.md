@@ -6,7 +6,7 @@ Built for Base's *Stocks Maxxing Season*, Programmable Stock Markets track (cust
 
 ## Live on Base
 
-App: **https://dcac-alpha.vercel.app**
+App: **https://dcac.miracleotugo.art**
 
 Deployed to Base mainnet on 2026-11-27 (block 62988364) from the audited launch code. Source verified on Basescan and Sourcify.
 

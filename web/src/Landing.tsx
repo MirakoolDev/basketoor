@@ -124,7 +124,7 @@ export function Landing() {
               ],
               [
                 "Idle cash earns yield",
-                "Optionally park the USDC waiting for its turn in a savings vault. You keep 90% of what it earns.",
+                "Optionally put the USDC waiting for its turn in Gauntlet USDC Prime, a Morpho lending vault. You keep 90% of what it earns.",
               ],
               [
                 "One tap with Base Account",
