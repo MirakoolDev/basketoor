@@ -345,10 +345,10 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
   return (
     <nav className="sticky top-0 z-20 border-b border-line bg-bg">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
-        <a href="#/" className="flex items-center gap-2">
-          <Wordmark className="h-7 w-auto" />
+        <a href="#/" className="flex shrink-0 items-center gap-2">
+          <Wordmark className="h-6 w-auto sm:h-7" />
         </a>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           {landing && (
             <>
               <a href="#how" className={link}>How it works</a>
@@ -356,10 +356,10 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
               <a href="#agents" className={link}>Agents</a>
             </>
           )}
-          <a href="#/explore" className="px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
+          <a href="#/explore" className="whitespace-nowrap px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
             Explore
           </a>
-          <a href="#/indexes" className="px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
+          <a href="#/indexes" className="whitespace-nowrap px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">
             Indexes
           </a>
           <a href="#/about" className="hidden px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:block sm:px-3">
@@ -368,9 +368,11 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
           <ThemeToggle />
           <a
             href={landing ? "#start" : "#/"}
-            className="grid h-9 place-items-center rounded-full bg-ink px-4 text-sm font-medium text-bg transition-opacity duration-150 hover:opacity-90"
+            className="grid h-9 shrink-0 place-items-center whitespace-nowrap rounded-full bg-ink px-3.5 text-sm font-medium text-bg transition-opacity duration-150 hover:opacity-90 sm:px-4"
           >
-            Launch app
+            <span>
+              Launch<span className="hidden min-[400px]:inline"> app</span>
+            </span>
           </a>
         </div>
       </div>
