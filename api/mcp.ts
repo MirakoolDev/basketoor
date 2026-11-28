@@ -2,7 +2,7 @@
 // Add it to Claude, Cursor or any MCP client as a remote server. No auth: every tool reads public chain data
 // or returns unsigned transactions.
 
-import { json, runTool, ToolError, TOOLS } from "./_lib/dcac";
+import { json, runTool, ToolError, TOOLS } from "./_lib/dcac.js";
 
 type Rpc = { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: Record<string, unknown> };
 

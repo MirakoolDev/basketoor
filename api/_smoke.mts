@@ -1,6 +1,6 @@
 // Smoke test of the agent tools against live Base (reads only): npx tsx api/_smoke.mts
-import { runTool } from "./_lib/dcac";
-import { POST } from "./mcp";
+import { runTool } from "./_lib/dcac.js";
+import { POST } from "./mcp.js";
 const show = async (n: string, a: unknown) => { try { const r = await runTool(n, a); console.log("##", n, JSON.stringify(r).slice(0, 900)); } catch (e) { console.log("##", n, "ERR", (e as Error).message); } };
 await show("dcac_assets", { search: "nvda" });
 await show("dcac_indexes", { limit: 3 });

@@ -4,7 +4,7 @@
 
 import { createPublicClient, encodeFunctionData, fallback, getAddress, http, isAddress, parseAbi, zeroAddress, type Address } from "viem";
 import { base } from "viem/chains";
-import { deployment } from "./deployment";
+import { deployment } from "./deployment.js";
 
 export const SITE = "https://dcac.fun";
 const BANKR_API = "https://api.bankr.bot";

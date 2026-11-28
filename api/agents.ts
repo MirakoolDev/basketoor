@@ -3,7 +3,7 @@
 // POST /api/agents/<tool> {json}   -> run a tool with a JSON body
 // Vercel rewrites /api/agents/<tool> to /api/agents?tool=<tool> (vercel.json).
 
-import { json, runTool, ToolError, TOOLS } from "./_lib/dcac";
+import { json, runTool, ToolError, TOOLS } from "./_lib/dcac.js";
 
 function fromQuery(q: URLSearchParams): Record<string, unknown> {
   const out: Record<string, unknown> = {};
