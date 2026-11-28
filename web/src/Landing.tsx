@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useConnect } from "wagmi";
+import { BANKR, useIndexes } from "./bankr";
 import { Wordmark } from "./Wordmark";
 import { CHAIN_ID, dep, isLocal } from "./config";
 import { useStocks, type StockInfo } from "./data";
@@ -25,14 +27,14 @@ export function Landing() {
               bought on autopilot.
             </h1>
             <p className="mt-5 max-w-md text-[17px] leading-[1.45] text-muted">
-              Build a basket of up to five tokenized stocks and tokens. Pick how much and how often. DCAC buys them
-              onchain, on schedule, straight into your wallet, and checks every fill against Chainlink.
+              Build a basket of up to five tokenized stocks, crypto and index tokens. Pick how much and how often. DCAC
+              buys them onchain, on schedule, straight into your wallet, and checks every fill against its oracle price.
             </p>
             <div className="mt-8 max-w-sm">
               <Connect />
             </div>
           </div>
-          <HeroBasket assets={pick(["NVDA", "AAPL", "ETH"])} loading={stocks.isLoading} />
+          <HeroBasket assets={pick(["NVDAc", "AAPLc", "ETH"])} loading={stocks.isLoading} />
         </section>
 
         {/* Live assets */}
@@ -59,7 +61,10 @@ export function Landing() {
             </div>
           )}
           <p className="mt-3 text-xs text-faint">
-            Coinbase tokenized stocks (1:1 backed by shares in regulated custody) and Base's major tokens.
+            Coinbase tokenized stocks (1:1 backed by shares in regulated custody) and Base's major tokens.{" "}
+            <a href="#/stocks" className="underline underline-offset-2 hover:text-ink">
+              More stocks
+            </a>
           </p>
         </section>
 
@@ -81,11 +86,13 @@ export function Landing() {
           </div>
         </section>
 
+        <IndexesSection />
+
         {/* Shared baskets */}
         <section className="pb-16">
           <div className="rounded-2xl bg-surface p-6 md:p-10">
             <div className="font-doto text-sm font-bold tracking-wider text-muted">SHARED BASKETS</div>
-            <h2 className="headline mt-3 max-w-xl text-[32px] md:text-[40px]">Build an index. Earn when it's copied.</h2>
+            <h2 className="headline mt-3 max-w-xl text-[32px] md:text-[40px]">Share a basket. Earn when it's copied.</h2>
             <p className="mt-3 max-w-xl text-muted">
               Every basket has a link. When someone starts their own basket from yours, you get half of the fee on each of their
               buys, paid in USDC as it happens. It costs them nothing extra.
@@ -109,6 +116,8 @@ export function Landing() {
           </div>
         </section>
 
+        <AgentsSection />
+
         {/* Why */}
         <section className="pb-16">
           <h2 className="headline text-[32px] md:text-[40px]">Built to be trusted with a schedule</h2>
@@ -116,7 +125,7 @@ export function Landing() {
             {[
               [
                 "Every fill is price-checked",
-                "Before a buy is accepted, the contract compares it with the Chainlink price. Anything more than 1.5% worse is skipped and the USDC stays in your basket.",
+                "Before a buy is accepted, the contract compares it with the asset's oracle price: Chainlink for stocks and crypto, the basket's value for an index. Anything more than 1.5% worse is skipped and the USDC stays in your basket.",
               ],
               [
                 "Your keys, your shares",
@@ -167,6 +176,14 @@ export function Landing() {
                 "Yes. Change amounts, frequency or the number of buys, or stop it and get every unspent dollar back in the same transaction.",
               ],
               [
+                "What's an index token?",
+                "One token backed by a basket of stocks and crypto it holds, built on Bankr's index contracts. Buying it buys the basket, and anyone can redeem it for the basket at any time. Indexes listed on DCAC can go in your basket like any stock.",
+              ],
+              [
+                "Can my AI agent set this up?",
+                "Yes. Connect DCAC's MCP server or give your agent dcac.fun/skill.md. It can check prices, quote a plan and hand you a link that opens it filled in. You still sign in your own wallet; the agent never holds keys.",
+              ],
+              [
                 "Who can use it?",
                 "Anyone outside the US. Tokenized stocks aren't available to US persons, and DCAC isn't investment advice.",
               ],
@@ -202,6 +219,126 @@ export function Landing() {
   );
 }
 
+/// Bankr index tokens: the three biggest, live, and what you can do with one.
+function IndexesSection() {
+  const list = useIndexes();
+  const top = (list.data ?? []).filter((i) => !i.tradingPaused).slice(0, 3);
+  return (
+    <section id="indexes" className="scroll-mt-20 pb-16">
+      <div className="font-doto text-sm font-bold tracking-wider text-muted">INDEXES · BUILT ON BANKR</div>
+      <h2 className="headline mt-3 max-w-2xl text-[32px] md:text-[40px]">One token. A whole basket.</h2>
+      <p className="mt-3 max-w-2xl text-muted">
+        An index token holds a basket of stocks and crypto, and anyone can redeem it for that basket at any time. Make your own, buy one every
+        week, or launch a coin on top of one.
+      </p>
+      <div className="mt-6 grid gap-3 md:grid-cols-3">
+        {[
+          ["Create an index", "Pick 2 to 20 stocks and tokens and their weights. You set its trading fee, from 0.25% to 1%, and keep 60% of it.", "#/indexes/new", "Create one →"],
+          ["Buy it every week", "Put an index in a DCAC basket next to single stocks and crypto. Each buy is checked against the basket's value.", "#/indexes", "Browse indexes →"],
+          ["Launch a coin on it", "On Bankr, a new token can trade against an index instead of ETH, so the coin's fees arrive as the index.", BANKR.launchDocs, "How it works ↗"],
+        ].map(([t, d, href, cta]) => (
+          <a
+            key={t}
+            href={href}
+            target={href.startsWith("http") ? "_blank" : undefined}
+            rel="noreferrer"
+            className="group rounded-xl bg-surface p-5 transition-shadow duration-150 hover:ring-1 hover:ring-line"
+          >
+            <div className="font-semibold tracking-[-0.01em]">{t}</div>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{d}</p>
+            <div className="mt-4 text-sm font-medium group-hover:underline group-hover:underline-offset-4">{cta}</div>
+          </a>
+        ))}
+      </div>
+      {top.length > 0 && (
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          {top.map((i) => {
+            const ch = i.change24hPct ?? 0;
+            return (
+              <a key={i.address} href={`#/indexes/${i.address}`} className="rounded-xl p-4 ring-1 ring-line transition-colors duration-150 hover:bg-surface">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="truncate font-semibold">{i.name}</span>
+                  <span className={`num shrink-0 text-xs font-medium ${ch >= 0 ? "text-up" : "text-down"}`}>
+                    {ch >= 0 ? "+" : ""}
+                    {ch.toFixed(2)}% 24h
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {i.componentsPreview.slice(0, 5).map((c) => (
+                    <span key={c.symbol} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-muted">
+                      {c.symbol}
+                    </span>
+                  ))}
+                  {i.componentCount > 5 && <span className="px-1 text-[11px] text-faint">+{i.componentCount - 5}</span>}
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const MCP_CMD = "claude mcp add --transport http dcac https://dcac.fun/mcp";
+
+/// DCAC for AI agents: what asking looks like, and how to connect one.
+function AgentsSection() {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(MCP_CMD);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* the command stays selectable */
+    }
+  };
+  return (
+    <section id="agents" className="scroll-mt-20 pb-16">
+      <div className="grid items-center gap-8 rounded-2xl bg-surface p-6 md:grid-cols-[1fr_1.05fr] md:p-10">
+        <div className="min-w-0">
+          <div className="font-doto text-sm font-bold tracking-wider text-muted">FOR AI AGENTS</div>
+          <h2 className="headline mt-3 text-[32px] md:text-[40px]">Ask your agent. Sign it yourself.</h2>
+          <p className="mt-3 text-muted">
+            DCAC has an MCP server and a skill. Your agent checks prices, quotes the plan and hands you a link that opens it filled in. It never
+            holds your keys.
+          </p>
+          <div className="mt-5 flex items-center gap-2 rounded-lg bg-bg p-2 pl-3 ring-1 ring-line">
+            <code className="min-w-0 flex-1 overflow-x-auto font-mono text-xs whitespace-nowrap select-all">{MCP_CMD}</code>
+            <button onClick={copy} className="h-8 shrink-0 rounded-md bg-surface-2 px-3 text-xs font-medium ring-1 ring-line hover:ring-faint">
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium">
+            <a href="/agents.md" target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+              Agent guide ↗
+            </a>
+            <a href="/skill.md" target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+              Skill file ↗
+            </a>
+            <a href="https://github.com/MirakoolDev/basketoor/tree/main/agents/hermes" target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+              Hermes plugin ↗
+            </a>
+          </div>
+        </div>
+        <div className="min-w-0 space-y-3 rounded-xl bg-bg p-4 text-sm ring-1 ring-line" aria-label="Example conversation">
+          <div className="ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-md bg-ink px-3.5 py-2 text-bg">Buy $15 of NVDA and $5 of ETH every week for a year.</div>
+          <div className="max-w-[92%] space-y-2 rounded-2xl rounded-bl-md bg-surface px-3.5 py-2.5">
+            <div className="font-mono text-[11px] text-faint">dcac_quote · dcac_build_plan</div>
+            <p>
+              52 weekly buys of $20, plus a $0.10 fee each. Deposit <span className="num font-semibold">$1,045.20</span> USDC once. Stop any
+              time for a refund of what's unspent. Open this to check and sign:
+            </p>
+            <div className="truncate rounded-lg bg-bg px-3 py-2 font-mono text-[11px] text-muted ring-1 ring-line">dcac.fun/#/new?mix=…&amp;every=604800&amp;buys=52</div>
+          </div>
+          <p className="text-center text-[11px] text-faint">Example. The link opens the plan in DCAC for you to check and sign.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /// Top bar shared by the public pages (landing and about).
 export function SiteNav({ landing = false }: { landing?: boolean }) {
   const link = "hidden px-3 text-sm text-muted transition-colors duration-150 hover:text-ink sm:block";
@@ -216,6 +353,7 @@ export function SiteNav({ landing = false }: { landing?: boolean }) {
             <>
               <a href="#how" className={link}>How it works</a>
               <a href="#pricing" className={link}>Pricing</a>
+              <a href="#agents" className={link}>Agents</a>
             </>
           )}
           <a href="#/explore" className="px-2 text-sm text-muted transition-colors duration-150 hover:text-ink sm:px-3">

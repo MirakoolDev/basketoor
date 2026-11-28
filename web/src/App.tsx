@@ -6,6 +6,7 @@ import { short } from "./format";
 import { Card, Spinner, ThemeToggle } from "./ui";
 import { Landing } from "./Landing";
 import { CreateIndex, IndexPage, Indexes } from "./Indexes";
+import { ListStocks } from "./ListStocks";
 import { About } from "./About";
 import { Explore } from "./Explore";
 import { Home } from "./Home";
@@ -15,13 +16,14 @@ import { PlanDetail } from "./PlanDetail";
 // Loaded only when opened: it carries the contracts' bytecode.
 const Deploy = lazy(() => import("./Deploy").then((m) => ({ default: m.Deploy })));
 
-export type Route = { page: "indexes" } | { page: "index-new" } | { page: "index"; address: `0x${string}` } | { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "copy"; id: bigint } | { page: "explore" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
+export type Route = { page: "indexes" } | { page: "stocks" } | { page: "index-new" } | { page: "index"; address: `0x${string}` } | { page: "home" } | { page: "about" } | { page: "deploy" } | { page: "new" } | { page: "copy"; id: bigint } | { page: "explore" } | { page: "plan"; id: bigint } | { page: "edit"; id: bigint };
 
 function parse(hash: string): Route {
   const [, a, b, c] = hash.replace(/^#/, "").split("?")[0].split("/");
   if (a === "new") return { page: "new" };
   if (a === "about") return { page: "about" };
   if (a === "explore") return { page: "explore" };
+  if (a === "stocks") return { page: "stocks" };
   if (a === "indexes" && b === "new") return { page: "index-new" };
   if (a === "indexes" && b && /^0x[0-9a-fA-F]{40}$/.test(b)) return { page: "index", address: b as `0x${string}` };
   if (a === "indexes") return { page: "indexes" };
@@ -70,6 +72,7 @@ export function App() {
   if (route.page === "about") return <About />;
   if (route.page === "explore") return <Explore />;
   if (route.page === "indexes") return <Indexes />;
+  if (route.page === "stocks") return <ListStocks />;
   if (route.page === "index") return <IndexPage key={route.address} address={route.address} />;
   if (route.page === "index-new") return <CreateIndex />;
   // Shared basket links open without a wallet, so people see the mix before they sign in.

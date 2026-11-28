@@ -24,6 +24,8 @@ export function StockLogo({
   size?: number;
 }) {
   const list = useTokenList();
+  // Coinbase stock tokens are named NVDAc onchain; logos are keyed by the ticker itself.
+  symbol = kind === "stock" ? symbol.replace(/c$/, "") : symbol;
   const sources = useMemo(() => {
     const s: string[] = [];
     if (src) s.push(src);

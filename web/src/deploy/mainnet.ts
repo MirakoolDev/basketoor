@@ -19,7 +19,10 @@ export const MAINNET = {
   usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   aerodromeClFactory: "0x9CB220581b91b0C83223012FE69688b92aD07a76",
   savingsVault: "0xeE8F4eC5672F09119b96Ab6fB59C27E1b7e44b61", // Gauntlet USDC Prime (Morpho)
-  twapWindow: 1800, // seconds
+  // PoolTwapFeed settings for stocks without Chainlink: a 30-minute window in six 5-minute slices. The feed refuses
+  // when a slice, or the pool price now, is more than 150 ticks (about 1.5%) from the median, or when it takes less
+  // than $5,000 to move the pool 1%. Pools must keep 1,200 observations.
+  twap: { window: 1800, slices: 6, maxDeviationTicks: 150, minDepthUsdc: 5_000_000_000n, observations: 1200 },
   // Launch fees, set at deploy. The owner can change them any time with setFees; each basket keeps the fees it
   // was created with. (The minimum buy, $1 per asset, is separate: setLimits.)
   fees: { feeBps: 50, minFee: 100_000n, yieldFeeBps: 1_000 }, // 0.5% per buy, $0.10 minimum fee, 10% of savings yield
@@ -69,7 +72,7 @@ export const ALL_MAINNET_ASSETS: MainnetAsset[] = [
   { symbol: "cbBTC", name: "Coinbase Wrapped BTC", kind: "crypto", decimals: 8, token: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", pool: "0x42609aA1E58C5dD7E5a012DC74118fFf975F0Eac", chainlink: "0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D" },
 ];
 
-/// Listed at launch: Chainlink-priced assets only. The TWAP-priced stocks are left off until their feed has a second
-/// check (imd.fun re-audit, Nov 27 2026: their pools are thin outside a narrow band, so a short price spike moves the
-/// 30-minute TWAP enough to make DCAC accept bad fills). PoolTwapFeed stays in the codebase for later.
+/// Listed at launch: Chainlink-priced assets only (imd.fun re-audit, Nov 27 2026: a short price spike moved the old
+/// 30-minute TWAP enough to make DCAC accept bad fills). PoolTwapFeed now refuses spikes and thin pools; the owner
+/// lists the other stocks one by one from #/stocks (ListStocks.tsx) once their pool passes.
 export const MAINNET_ASSETS: MainnetAsset[] = ALL_MAINNET_ASSETS.filter((a) => a.chainlink);

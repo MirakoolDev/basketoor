@@ -69,7 +69,7 @@ The tools live in `api/_lib/dcac.ts` (Vercel functions; `npx tsx api/_smoke.mts`
 
 ## Layout
 
-- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed, unused at launch), `src/adapters/BankrIndexRouter.sol` + `src/feeds/BankrIndexNavFeed.sol` (Bankr index buys, see above), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.
+- `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed for stocks without Chainlink, listed per stock from `#/stocks`), `src/adapters/BankrIndexRouter.sol` + `src/feeds/BankrIndexNavFeed.sol` (Bankr index buys, see above), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.
 - `keeper/`: Node script that calls `executeDue` and, on testnet, copies real Base mainnet Chainlink prices into the mock feeds. On mainnet a KeeperHub workflow does this instead (below).
 - `web/`: Vite + React + wagmi/viem. Base Account sign-in, EIP-5792 batched approve + create, Base Builder Code attribution (`VITE_BUILDER_CODE`). `#/deploy` (dev server only) deploys everything from your own wallet through the CREATE2 deployer and writes `contracts/deployments/<chainId>.json`; that's how the mainnet deployment was made.
 
@@ -113,12 +113,12 @@ Two audits by [imd.fun](https://imd.fun), both of `contracts/`:
 | Audit | `b14b3cc` (2026-11-25) | 15: 5 medium, 7 low, 3 info | [`contracts/audit/imd-report.md`](contracts/audit/imd-report.md) |
 | Re-audit | `404e0ce` (2026-11-27) | 11: 1 high, 2 medium, 5 low, 3 info | [`contracts/audit/imd-reaudit-report.md`](contracts/audit/imd-reaudit-report.md) |
 
-Every finding is resolved in the launch commit `c260bcd`: fixed with a test, taken out of the launch, or accepted with a reason. [`contracts/AUDIT.md`](contracts/AUDIT.md) lists each one and what happened to it. The re-audit's one high finding is in the TWAP price feed for stocks without Chainlink; those stocks aren't listed at launch, so only Chainlink-priced assets can be bought.
+Every finding is resolved in the launch commit `c260bcd`: fixed with a test, taken out of the launch, or accepted with a reason. [`contracts/AUDIT.md`](contracts/AUDIT.md) lists each one and what happened to it. The re-audit's one high finding is in the TWAP price feed for stocks without Chainlink; those stocks weren't listed at launch. The feed was fixed afterwards (median of six 5-minute slices, refuses spikes and thin pools; findings 1 and 6 in `contracts/AUDIT.md`) and hasn't been re-reviewed.
 
 ## Notes
 
 - Swaps go through owner-set Aerodrome Slipstream pools, where Coinbase's B20 stocks are deepest. Another venue is one more `ISwapAdapter`.
-- Coinbase stocks without a Chainlink feed can be listed later with `PoolTwapFeed`; none are at launch (see the re-audit's high finding in `contracts/AUDIT.md`).
+- Coinbase stocks without a Chainlink feed can be listed by the owner with `PoolTwapFeed` from [dcac.fun/#/stocks](https://dcac.fun/#/stocks), which runs the feed's checks on each pool live. 13 of the 25 passed on Nov 28; the rest have too little liquidity.
 - B20 transfer policies: a blocked recipient makes that leg skip (its USDC stays in the plan).
 - No timelock on owner settings yet; existing baskets keep their fee terms whatever the owner changes.
 - US persons are excluded in the app; the contract itself is permissionless.

@@ -74,11 +74,24 @@ async function loadAssets(): Promise<Asset[]> {
   const knownSet = new Set(known.map((s) => s.token.toLowerCase()));
   const extra = all.filter((a) => !knownSet.has(a.toLowerCase()));
   const indexFlags = await Promise.all(extra.map((t) => client.readContract({ address: BANKR_FACTORY, abi: isVaultAbi, functionName: "isVault", args: [t] }).catch(() => false)));
-  const indexes = extra.filter((_, i) => indexFlags[i]);
+  // Listed after launch: Bankr indexes, and Coinbase stocks (0xb2000000…) priced from their own pool (#/stocks).
+  const isStockToken = (t: string) => t.toLowerCase().startsWith("0xb2" + "0".repeat(20));
 
-  const rows = [
-    ...known.map((s) => ({ token: s.token, symbol: s.symbol, name: s.name, kind: (s.kind ?? "stock") as Asset["kind"], pricing: s.pricing ?? "chainlink" })),
-    ...indexes.map((t) => ({ token: t, symbol: "", name: "", kind: "index" as const, pricing: "bankr" })),
+  const rows: { token: Address; symbol: string; name: string; kind: Asset["kind"]; pricing: string }[] = [
+    ...known.map((s) => ({
+      token: s.token,
+      symbol: (s.kind ?? "stock") === "stock" ? `${s.symbol}c` : s.symbol, // the onchain name: NVDAc
+      name: s.name,
+      kind: (s.kind ?? "stock") as Asset["kind"],
+      pricing: s.pricing ?? "chainlink",
+    })),
+    ...extra.flatMap((t, i) =>
+      indexFlags[i]
+        ? [{ token: t, symbol: "", name: "", kind: "index" as Asset["kind"], pricing: "bankr" }]
+        : isStockToken(t)
+          ? [{ token: t, symbol: "", name: "", kind: "stock" as Asset["kind"], pricing: "twap" }]
+          : [],
+    ),
   ];
   const out = await Promise.all(
     rows.map(async (r) => {
@@ -109,7 +122,7 @@ async function loadAssets(): Promise<Asset[]> {
 const PRICING: Record<string, string> = {
   chainlink: "Chainlink, market hours only",
   "chainlink-24/7": "Chainlink, 24/7",
-  twap: "30-minute average of its Aerodrome pool",
+  twap: "30-minute average of its Aerodrome pool, refused on spikes or thin liquidity",
   bankr: "basket value plus index fee (Bankr IndexLens)",
 };
 

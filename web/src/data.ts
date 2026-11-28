@@ -4,6 +4,7 @@ import { getWalletClient } from "wagmi/actions";
 import { zeroAddress, type Abi, type Address, type ContractFunctionReturnType, type Hex, type PublicClient } from "viem";
 import { dcacAbi, erc20Abi } from "./abi";
 import { BANKR, bankrAbi } from "./bankr";
+import { ALL_MAINNET_ASSETS } from "./deploy/mainnet";
 import { createWalletClient, http as httpTransport, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
@@ -106,7 +107,7 @@ export function useStocks() {
               : 10n ** 18n,
           ]);
           return {
-            symbol: s.symbol,
+            symbol: (s.kind ?? "stock") === "stock" ? `${s.symbol}c` : s.symbol, // the onchain name: NVDAc
             name: s.name,
             kind: s.kind ?? "stock",
             token: s.token,
@@ -124,14 +125,36 @@ export function useStocks() {
   });
 }
 
-/// Bankr index tokens the owner listed on DCAC after launch (anything in DCAC's asset list that isn't in the
-/// deployment file and that Bankr's factory recognises). Read from the chain so a new listing needs no app release.
+/// Assets the owner listed on DCAC after launch, read from the chain so a new listing needs no app release:
+/// Coinbase stocks priced from their own pool (from #/stocks) and Bankr index tokens (anything Bankr's factory
+/// recognises).
 async function listedIndexes(pc: PublicClient, known: Set<string>): Promise<StockInfo[]> {
   if (dep.mock) return [];
   const all = (await pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "getAssets" }).catch(() => [])) as Address[];
   const extra = all.filter((a) => !known.has(a.toLowerCase()));
   const out = await Promise.all(
     extra.map(async (token): Promise<StockInfo | undefined> => {
+      const stock = ALL_MAINNET_ASSETS.find((a) => a.token.toLowerCase() === token.toLowerCase());
+      if (stock) {
+        const [[p, updatedAt, usable], [, , , enabled], mult] = await Promise.all([
+          pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [token] }),
+          pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "assets", args: [token] }),
+          pc.readContract({ address: token, abi: multiplierAbi, functionName: "multiplier" }).catch(() => 10n ** 18n),
+        ]);
+        if (!enabled) return undefined;
+        return {
+          symbol: stock.kind === "stock" ? `${stock.symbol}c` : stock.symbol,
+          name: stock.name,
+          kind: stock.kind,
+          token,
+          decimals: stock.decimals,
+          price: Number(p) / 1e8,
+          updatedAt: Number(updatedAt),
+          usable,
+          pricing: stock.chainlink ? "chainlink" : "twap",
+          multiplier: Number(mult) / 1e18,
+        } satisfies StockInfo;
+      }
       const isIndex = await pc.readContract({ address: BANKR.factory, abi: bankrAbi, functionName: "isVault", args: [token] }).catch(() => false);
       if (!isIndex) return undefined;
       const [[p, updatedAt, usable], symbol, name, decimals] = await Promise.all([

@@ -134,6 +134,22 @@ const mainnetAbi = parseAbi([
 ]);
 const MAINNET_ASSETS_PER_BATCH = 5;
 
+/// PoolTwapFeed constructor arguments for a stock priced from its own Aerodrome pool.
+export function twapFeedArgs(a: Pick<MainnetAsset, "pool" | "token" | "decimals">): Hex {
+  const t = MAINNET.twap;
+  return encodeAbiParameters(parseAbiParameters("address, address, address, uint8, uint8, uint32, uint8, int24, uint256"), [
+    a.pool,
+    a.token,
+    MAINNET.usdc,
+    a.decimals,
+    6,
+    t.window,
+    t.slices,
+    t.maxDeviationTicks,
+    t.minDepthUsdc,
+  ]);
+}
+
 /// Base mainnet: the Aerodrome swap adapter, DCAC on real USDC with the Gauntlet USDC Prime savings vault,
 /// and every listed asset routed through its Aerodrome pool and priced from Chainlink, or from a 30-minute
 /// pool TWAP feed deployed here when Chainlink has none.
@@ -179,7 +195,7 @@ export function buildMainnetDeployment(roles: Omit<Roles, "priceUpdater">, salt:
         const twap = create(
           `${a.symbol} TWAP feed`,
           bytecode.PoolTwapFeed,
-          p("address, address, address, uint8, uint8, uint32", [a.pool, a.token, MAINNET.usdc, a.decimals, 6, MAINNET.twapWindow]),
+          twapFeedArgs(a),
         );
         calls.push(twap);
         feed = twap.creates;

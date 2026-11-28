@@ -217,8 +217,8 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
   // Coinbase stocks that exist on Base but have no onchain market deep enough to buy through yet.
   const untradable = useMemo(() => {
     if (!q || kind !== "stock") return [];
-    const listed = new Set((stocks.data ?? []).map((x) => x.symbol));
-    return COINBASE_STOCKS.filter(([sym, nm, addr]) => !listed.has(sym) && matches(sym, nm, addr))
+    const listed = new Set((stocks.data ?? []).map((x) => x.token.toLowerCase()));
+    return COINBASE_STOCKS.filter(([sym, nm, addr]) => !listed.has(addr.toLowerCase()) && matches(sym, nm, addr))
       .sort((a, b) => rank({ symbol: a[0], name: a[1] }, q) - rank({ symbol: b[0], name: b[1] }, q))
       .slice(0, 8);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,13 +324,13 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
         )}
         {untradable.length > 0 && (
           <div className="mt-4">
-            <div className="mb-2 text-xs font-medium text-muted">Coinbase stocks · not tradable on Base yet</div>
+            <div className="mb-2 text-xs font-medium text-muted">Coinbase stocks · not on DCAC yet (see More stocks at dcac.fun/#/stocks)</div>
             <div className="divide-y divide-line rounded-lg bg-surface-2 ring-1 ring-line">
               {untradable.map(([sym, nm, addr]) => (
                 <div key={addr} className="flex items-center gap-2.5 p-2.5 text-faint">
                   <StockLogo symbol={sym} token={addr} kind="stock" size={26} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold">{sym}</div>
+                    <div className="text-sm font-semibold">{sym}c</div>
                     <div className="truncate text-xs">{nm}</div>
                   </div>
                   <Pill>soon</Pill>

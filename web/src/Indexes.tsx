@@ -30,7 +30,7 @@ import {
 
 // ---------------------------------------------------------------- owner wiring (CREATE2, so addresses are known)
 
-const create2 = (label: string, code: string, args: Hex) => {
+export const create2 = (label: string, code: string, args: Hex) => {
   const salt = keccak256(toHex(`dcac:${label}`));
   const initCode = concat([code as Hex, args]);
   return { address: getContractAddress({ opcode: "CREATE2", from: CREATE2_DEPLOYER, salt, bytecode: initCode }), data: concat([salt, initCode]) };
