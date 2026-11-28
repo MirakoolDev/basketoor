@@ -1,7 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm ci --prefix web",
+  "installCommand": "npm ci && npm ci --prefix web",
   "buildCommand": "npm run build --prefix web",
-  "outputDirectory": "web/dist"
+  "outputDirectory": "web/dist",
+  "rewrites": [
+    { "source": "/mcp", "destination": "/api/mcp" },
+    { "source": "/api/agents/:tool", "destination": "/api/agents?tool=:tool" }
+  ],
+  "headers": [
+    { "source": "/(agents.md|llms.txt|skill.md)", "headers": [{ "key": "content-type", "value": "text/markdown; charset=utf-8" }, { "key": "access-control-allow-origin", "value": "*" }] }
+  ]
 }

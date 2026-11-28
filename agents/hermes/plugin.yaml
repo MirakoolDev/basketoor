@@ -1,0 +1,15 @@
+name: dcac
+version: "1.0.0"
+description: "Recurring buys of tokenized stocks, crypto and Bankr index tokens on Base with DCAC: see what can be bought, price a plan, check a wallet's plans, and get a prefilled link or unsigned transactions for your own wallet to sign."
+author: DCAC
+requires_hermes: ">=0.21.6"
+provides_tools:
+  - dcac_assets
+  - dcac_indexes
+  - dcac_quote
+  - dcac_build_plan
+  - dcac_plans
+  - dcac_plan
+  - dcac_build_cancel
+provides_hooks: []
+requires_env: []

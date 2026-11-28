@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAccount, usePublicClient, useReadContract } from "wagmi";
 import { concat, encodeAbiParameters, encodeFunctionData, getAddress, getContractAddress, keccak256, parseAbiParameters, toHex, type Address, type Hex } from "viem";
-import { dcacAbi } from "./abi";
-import { dep } from "./config";
+import { dcacAbi, erc20Abi } from "./abi";
+import { dep, explorer } from "./config";
 import { useSend, useSendTxs, useStocks, useUsdc, usd } from "./data";
-import { money, pct, short } from "./format";
+import { money, pct, qty, short } from "./format";
 import { Button, Card, Pill, Spinner, StockLogo } from "./ui";
 import { Connect, SiteFooter, SiteNav } from "./Landing";
 import { go } from "./App";
@@ -12,6 +13,7 @@ import bytecode from "./deploy/bytecode.json";
 import { CREATE2_DEPLOYER } from "./deploy/plan";
 import {
   BANKR,
+  bankrAbi,
   blockerText,
   buildCreate,
   quoteCreate,
@@ -21,6 +23,7 @@ import {
   useIndexes,
   type Component,
   type CreateBody,
+  type IndexDetail,
   type IndexSummary,
   type Quote,
 } from "./bankr";
@@ -261,6 +264,8 @@ export function IndexPage({ address }: { address: Address }) {
               </p>
             </Card>
 
+            <Holdings i={i} onDcac={onDcac} />
+
             <div className="grid gap-2 sm:grid-cols-3">
               {onDcac ? (
                 <Button onClick={recurring}>Buy every week</Button>
@@ -290,6 +295,101 @@ export function IndexPage({ address }: { address: Address }) {
       </main>
       <SiteFooter />
     </div>
+  );
+}
+
+/// What the index token holds, read straight from Base: each basket token's balance in the index's own contract,
+/// next to Bankr's figure, plus the basket value per token from Bankr's onchain IndexLens and what DCAC pays.
+function Holdings({ i, onDcac }: { i: IndexDetail; onDcac: boolean }) {
+  const pc = usePublicClient();
+  const chain = useQuery({
+    queryKey: ["index-holdings", i.address],
+    enabled: !!pc,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const [block, balances, lens, fee] = await Promise.all([
+        pc!.getBlockNumber(),
+        Promise.all(i.components.map((c) => pc!.readContract({ address: c.address, abi: erc20Abi, functionName: "balanceOf", args: [i.address] }))),
+        pc!.readContract({ address: BANKR.lens, abi: bankrAbi, functionName: "navUsdE18", args: [i.address] }),
+        pc!.readContract({ address: BANKR.hook, abi: bankrAbi, functionName: "feeBpsOf", args: [i.address] }),
+      ]);
+      const [, , navPerShareE18, complete] = lens;
+      return { block, balances, navPerShare: Number(navPerShareE18) / 1e18, complete, feeBps: Number(fee) };
+    },
+  });
+  const link = (a: string) => (explorer ? `${explorer}/token/${a}?a=${i.address}` : undefined);
+  const d = chain.data;
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">What it holds, onchain</div>
+        {d ? (
+          d.complete ? <Pill tone="up">● prices fresh</Pill> : <Pill tone="warn">prices not fresh, buys wait</Pill>
+        ) : (
+          <Spinner />
+        )}
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[420px] text-sm">
+          <thead>
+            <tr className="text-left text-[11px] text-faint">
+              <th className="pb-2 font-normal">Token</th>
+              <th className="pb-2 text-right font-normal">Held by the index</th>
+              <th className="pb-2 text-right font-normal">Value</th>
+              <th className="pb-2 text-right font-normal">Price from</th>
+            </tr>
+          </thead>
+          <tbody>
+            {i.components.map((c, n) => {
+              const held = d ? d.balances[n] : undefined;
+              const matches = held !== undefined && held.toString() === c.balanceRaw;
+              return (
+                <tr key={c.address} className="border-t border-line">
+                  <td className="py-2 font-medium">{c.symbol}</td>
+                  <td className="num py-2 text-right">
+                    {held === undefined ? "…" : (
+                      <a href={link(c.address)} target="_blank" rel="noreferrer" className="hover:underline" title={matches ? "Matches Bankr's figure" : "Bankr's figure differs, it may be a block behind"}>
+                        {qty(Number(held) / 10 ** c.decimals)} {matches ? "✓" : ""}
+                      </a>
+                    )}
+                  </td>
+                  <td className="num py-2 text-right">{money(c.valueUsd)}</td>
+                  <td className="py-2 text-right text-xs text-muted capitalize">{c.priceSource}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {d && (
+        <div className="mt-3 grid gap-1 border-t border-line pt-3 text-xs text-muted">
+          <div className="flex justify-between gap-3">
+            <span>Basket value per token (Bankr IndexLens)</span>
+            <span className="num text-ink">{money(d.navPerShare, { digits: 4 })}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Buy price with the {(d.feeBps / 100).toFixed(2)}% fee{onDcac ? ", what DCAC checks fills against" : ""}</span>
+            <span className="num text-ink">{money((d.navPerShare * (10_000 + d.feeBps)) / 10_000, { digits: 4 })}</span>
+          </div>
+          <p className="mt-1 text-faint">
+            Read from Base at block {d.block.toString()}. ✓ means the balance onchain matches Bankr's figure.{" "}
+            {explorer && (
+              <a href={`${explorer}/address/${i.address}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                Index contract ↗
+              </a>
+            )}
+            {onDcac && explorer && (
+              <>
+                {" · "}
+                <a href={`${explorer}/address/${navFeed(i.address).address}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                  DCAC price feed ↗
+                </a>
+              </>
+            )}
+          </p>
+        </div>
+      )}
+    </Card>
   );
 }
 

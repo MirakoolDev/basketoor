@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 import { dcacAbi } from "./abi";
 import { dep, explorer } from "./config";
-import { useChainNow, useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView } from "./data";
+import { useChainNow, useHistory, usePlan, useSend, useStocks, usd, type HistoryItem, type PlanView, type StockInfo } from "./data";
 import { countdown, date, dateTime, every, money, pct, qty, short } from "./format";
 import { BottomBar, Button, Card, Pill, Row, Spinner, StockLogo, valuePlan } from "./ui";
 import { go } from "./App";
@@ -75,12 +75,6 @@ export function PlanDetail({ id }: { id: bigint }) {
               {money(v.pnl, { sign: true })} ({pct(v.pnlPct)})
             </div>
           </div>
-          {p.active && (
-            <div className="text-right">
-              <div className="text-sm text-muted">Next buy</div>
-              <div className="num text-lg font-semibold">{countdown(p.nextRun, now)}</div>
-            </div>
-          )}
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-3 text-sm">
           <Stat label="Invested" value={money(v.invested)} />
@@ -88,6 +82,8 @@ export function PlanDetail({ id }: { id: bigint }) {
           <Stat label="Budget left" value={money(p.active ? usd(p.value) : 0)} />
         </div>
       </Card>
+
+      {p.active && <NextBuy p={p} stocks={stocks.data} now={now} />}
 
       <div className="flex gap-1 rounded-full bg-surface p-1 ring-1 ring-line">
         {(["status", "orders", "settings"] as Tab[]).map((t) => (
@@ -126,7 +122,7 @@ export function PlanDetail({ id }: { id: bigint }) {
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <Stat small label="Shares" value={qty(l.shares)} />
                 <Stat small label="Avg buy" value={l.avgPrice ? money(l.avgPrice) : "–"} />
-                <Stat small label="Now" value={l.stock ? money(l.stock.price) : "–"} />
+                <Stat small label="Now" value={l.stock ? money(l.stock.price / l.stock.multiplier) : "–"} />
               </div>
             </Card>
           ))}
@@ -236,6 +232,72 @@ function ShareButton({ p }: { p: PlanView }) {
     >
       {done ? "Link copied" : "Share"}
     </button>
+  );
+}
+
+/// What happens next and anything that would stop it: when, how much, into what, and which parts can't buy
+/// right now (a closed market, a stale index price), in the terms the contract applies them.
+function NextBuy({ p, stocks, now }: { p: PlanView; stocks?: StockInfo[]; now: number }) {
+  const legs = p.legs
+    .filter((l) => l.amount > 0n)
+    .map((l) => ({ ...l, stock: stocks?.find((s) => s.token.toLowerCase() === l.token.toLowerCase()) }));
+  const per = legs.reduce((s, l) => s + l.amount, 0n);
+  const bps = p.feeBps + (p.smart ? p.smartFeeBps : 0);
+  const feeRaw = (per * BigInt(bps)) / 10_000n;
+  const fee = feeRaw > p.minFee ? feeRaw : p.minFee;
+  const left = p.maxBuys - p.buysDone;
+  const covered = per + fee > 0n ? Number(p.value / (per + fee)) : 0;
+  const closed = legs.filter((l) => l.stock && !l.stock.usable);
+  const due = p.nextRun <= now;
+  const name = (l: (typeof legs)[number]) => l.stock?.symbol ?? short(l.token);
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm text-muted">Next buy · {p.buysDone + 1} of {p.maxBuys}</div>
+          <div className="num headline mt-1 text-[26px]">{due ? "Due now" : `in ${countdown(p.nextRun, now)}`}</div>
+          <div className="text-xs text-faint">{due ? "The keeper checks every few minutes." : dateTime(p.nextRun)}</div>
+        </div>
+        <div className="text-right">
+          <div className="num text-lg font-semibold">{money(usd(per))}</div>
+          <div className="num text-xs text-muted">+ {money(usd(fee))} fee</div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {legs.map((l) => (
+          <span key={l.token} className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 py-1 pr-2.5 pl-1 text-xs ring-1 ring-line">
+            <StockLogo symbol={name(l)} token={l.stock?.token} kind={l.stock?.kind} size={18} />
+            <span className="font-medium">{name(l)}</span>
+            {!p.smart && <span className="num text-muted">{money(usd(l.amount))}</span>}
+            {l.stock && !l.stock.usable && <span className="text-warn">●</span>}
+          </span>
+        ))}
+      </div>
+      <ul className="mt-3 space-y-1.5 border-t border-line pt-3 text-xs text-muted">
+        {p.smart && <li>Auto-rebalance is on: this buy is split toward your target mix, so the amounts per asset vary.</li>}
+        {closed.length > 0 && (
+          <li className="text-ink">
+            <span className="text-warn">●</span> {closed.map(name).join(", ")}{" "}
+            {closed.every((l) => l.stock?.kind === "index") ? "has no fresh basket price" : "can't be priced"} right now
+            {closed.some((l) => l.stock?.kind === "stock") ? " (market closed)" : ""}.{" "}
+            {closed.length === legs.length
+              ? "If nothing can buy at run time, the run is retried every hour."
+              : "If that's still true at run time, that part is skipped and its USDC stays in the basket."}
+          </li>
+        )}
+        {p.skippedRuns > 0 && (
+          <li className="text-ink">
+            <span className="text-warn">●</span> The last {p.skippedRuns > 1 ? `${p.skippedRuns} runs` : "run"} bought nothing. Retrying every hour.
+          </li>
+        )}
+        <li>
+          {covered >= left
+            ? `${left} ${left === 1 ? "buy" : "buys"} left, all covered by the budget.`
+            : `Budget covers ${covered} of the ${left} buys left. Add funds with Modify to keep it going.`}
+        </li>
+      </ul>
+    </Card>
   );
 }
 

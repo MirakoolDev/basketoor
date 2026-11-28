@@ -56,6 +56,17 @@ An index is one token backed by a basket of stocks and crypto it holds. DCAC bui
 
 Checked against live Base: `test/BankrIndex.t.sol` (fork, the deployed DCAC buying a crypto index and ETH in one plan) and `script/simulate-bankr-index.sh` (stock indexes, since a fork can't run stock tokens). $100 buys of MAG7, CSUITE and SPACE (0.5% fee) filled at about 99.9% of the feed's buy price, and HEAT (1% fee, Bankr's maximum) at 98.8%, all inside DCAC's 1.5% bound.
 
+## For AI agents
+
+Ask an agent to "buy $15 of NVDA and $5 of ETH every week for a year" and it can set the plan up; the person signs in their own wallet. Nothing on the agent side holds keys or signs.
+
+- **MCP server:** `https://dcac.fun/mcp` (Streamable HTTP, no auth). Claude Code: `claude mcp add --transport http dcac https://dcac.fun/mcp`.
+- **REST:** `https://dcac.fun/api/agents/<tool>`, same tools.
+- **Guides:** [agents.md](https://dcac.fun/agents.md), [llms.txt](https://dcac.fun/llms.txt), [skill.md](https://dcac.fun/skill.md) (a SKILL.md), and a Hermes plugin in `agents/hermes/`.
+- **Tools:** `dcac_assets`, `dcac_indexes`, `dcac_quote`, `dcac_build_plan` (a prefilled dcac.fun link plus unsigned approve and create transactions), `dcac_plans`, `dcac_plan`, `dcac_build_cancel`.
+
+The tools live in `api/_lib/dcac.ts` (Vercel functions; `npx tsx api/_smoke.mts` runs them against live Base).
+
 ## Layout
 
 - `contracts/`: Foundry. `src/DCAC.sol`, `src/adapters/AerodromeCLAdapter.sol` (mainnet venue: Aerodrome Slipstream pools), `src/adapters/UniswapV3Adapter.sol` (alternative, unused), `src/feeds/PoolTwapFeed.sol` (pool-average price feed, unused at launch), `src/adapters/BankrIndexRouter.sol` + `src/feeds/BankrIndexNavFeed.sol` (Bankr index buys, see above), `src/mocks/` (testnet stand-ins), `test/`, `script/DeployTestnet.s.sol`, `deployments/<chainId>.json`.

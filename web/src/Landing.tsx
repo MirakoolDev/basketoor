@@ -248,6 +248,10 @@ export function SiteFooter() {
           DCAC on {CHAIN_ID === 8453 ? "Base" : CHAIN_ID === 84532 ? "Base Sepolia" : "a local chain"}.
           {dep?.mock && " Test assets priced from Base mainnet Chainlink feeds."}{" "}
           <a href="#/about" className="underline underline-offset-2 hover:text-ink">Contracts & details</a>
+          {" · "}
+          <a href="/agents.md" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-ink" title="MCP server, API and skill for AI agents">
+            For AI agents
+          </a>
         </div>
         <div>Tokenized stocks aren't available to US persons. Not investment advice.</div>
       </div>

@@ -1,0 +1,16 @@
+{
+  "name": "dcac",
+  "private": true,
+  "type": "module",
+  "description": "Root package for Vercel functions in api/ (the DCAC agent API and MCP server). The app is in web/.",
+  "dependencies": {
+    "viem": "2.58.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "check:api": "tsc -p api/tsconfig.json"
+  }
+}

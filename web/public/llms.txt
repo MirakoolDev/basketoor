@@ -1,0 +1,28 @@
+# DCAC
+
+> Recurring buys of tokenized stocks, crypto and Bankr index tokens on Base. Pick up to 5 assets, how much of each, how often and for how long; deposit USDC once and DCAC buys on schedule, checking every fill against the asset's oracle price. Bought tokens go straight to the owner's wallet.
+
+## For agents
+
+- [Agent guide](https://dcac.fun/agents.md): tools, inputs, examples, contracts and rules.
+- [Skill](https://dcac.fun/skill.md): a SKILL.md for Claude and other agents.
+- MCP server: https://dcac.fun/mcp (Streamable HTTP, no auth). Claude Code: `claude mcp add --transport http dcac https://dcac.fun/mcp`.
+- REST: https://dcac.fun/api/agents (tool list), https://dcac.fun/api/agents/<tool>.
+- Nothing signs. Writes are unsigned transactions or prefilled dcac.fun links for the user's own wallet.
+
+## Product
+
+- Chain: Base (8453). Pays in USDC.
+- Assets: Coinbase tokenized stocks priced by Chainlink, ETH and cbBTC, and Bankr index tokens listed on DCAC.
+- Fee: 0.5% of each buy, at least $0.10; +0.25% with auto-rebalance. Live values come from the contract.
+- A buy more than 1.5% worse than the oracle price is refused. A stock that can't be priced (market closed) is skipped for that run; its USDC stays in the plan.
+- Savings yield on USDC waiting to be spent (Morpho vault). Stop any time for a refund of unspent USDC.
+- Copy any basket from its link; the person who shared it earns part of each buy fee.
+- Indexes: https://dcac.fun/#/indexes. Create a Bankr index, buy a listed one on a schedule, or launch a token paired with it on Bankr.
+
+## Source
+
+- https://github.com/MirakoolDev/basketoor
+- DCAC contract: 0xC9A54a67cDC9f78B7D8207fAF46Ff92663a03313 (Base)
+
+Tokenized stocks are not available to US persons. Not investment advice.

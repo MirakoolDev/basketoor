@@ -114,6 +114,7 @@ function PlanCard({ plan, stocks }: { plan: PlanView; stocks?: StockInfo[] }) {
   const v = valuePlan(plan, stocks);
   const assets = v.legs.filter((l) => l.amount > 0n || l.received > 0n).map((l) => l.stock);
   const perBuy = plan.legs.reduce((s, l) => s + l.amount, 0n);
+  const closed = v.legs.filter((l) => l.amount > 0n && l.stock && !l.stock.usable).map((l) => l.stock!.symbol);
   return (
     <button onClick={() => go(`/plan/${plan.id}`)} className="block w-full text-left">
       <Card className="transition-colors hover:bg-surface-2">
@@ -143,7 +144,10 @@ function PlanCard({ plan, stocks }: { plan: PlanView; stocks?: StockInfo[] }) {
           <span>
             {plan.buysDone}/{plan.maxBuys} buys
           </span>
-          <span>{plan.active ? `Next buy in ${countdown(plan.nextRun, now)}` : `Invested ${money(v.invested)}`}</span>
+          <span>
+            {plan.active ? `Next buy in ${countdown(plan.nextRun, now)}` : `Invested ${money(v.invested)}`}
+            {plan.active && closed.length > 0 && <span> · <span className="text-warn">●</span> {closed.join(", ")} waiting</span>}
+          </span>
         </div>
       </Card>
     </button>

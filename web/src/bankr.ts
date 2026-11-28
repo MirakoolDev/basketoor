@@ -19,6 +19,7 @@ export const BANKR = {
 export const bankrAbi = parseAbi([
   "function isVault(address vault) view returns (bool)",
   "function navUsdE18(address vault) view returns (uint256 nav, uint256 circulating, uint256 navPerShareE18, bool complete)",
+  "function feeBpsOf(address vault) view returns (uint16)",
 ]);
 
 export type IndexSummary = {
@@ -45,7 +46,19 @@ export type IndexDetail = IndexSummary & {
   fees: { totalBps: number; bankrBps: number; creatorBps: number; holdersBps: number };
   rebalance: { mode: "off" | "manual" | "auto"; rule: string; driftBps: number };
   status: { buysBlocked: string | null; sellsBlocked: string | null; marketOpen: boolean; navStale: boolean };
-  components: { address: Address; symbol: string; name: string; isStock: boolean; targetBps: number; currentBps: number; valueUsd: number }[];
+  components: {
+    address: Address;
+    symbol: string;
+    name: string;
+    decimals: number;
+    isStock: boolean;
+    targetBps: number;
+    currentBps: number;
+    balanceRaw: string; // what the index holds, raw units
+    valueUsd: number;
+    priceUsd: number;
+    priceSource: string; // e.g. chainlink, signed
+  }[];
 };
 
 export type Component = {

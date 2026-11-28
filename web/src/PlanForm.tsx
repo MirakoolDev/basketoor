@@ -91,6 +91,10 @@ export function PlanForm({ editId, copyId }: { editId?: bigint; copyId?: bigint 
     setInterval(shared.interval);
     setName(shared.name);
     setSmart(shared.smart);
+    if (shared.buys) {
+      setSpan(null);
+      setBuys(String(shared.buys));
+    }
     setLoaded(true);
   }, [shared, sharedLegs, stocks.data, loaded]);
   const creator = shared && shared.creator !== zeroAddress && shared.creator.toLowerCase() !== account?.toLowerCase() ? shared.creator : undefined;

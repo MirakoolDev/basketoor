@@ -4,7 +4,7 @@ import type { PlanView } from "./data";
 /// A shared basket travels in the link: who made it, the mix (each asset's dollars per buy in the original, which
 /// sets the proportions), how often, and its name. Nothing about it is stored onchain until someone opens a plan
 /// from it, and then only the creator's address, so they get their share of that plan's buy fees.
-export type SharedBasket = { creator: Address; legs: { token: Address; usd: number }[]; interval: number; name: string; smart: boolean };
+export type SharedBasket = { creator: Address; legs: { token: Address; usd: number }[]; interval: number; name: string; smart: boolean; buys?: number };
 
 /// The short link to copy basket #id: the app reads its mix from the chain.
 export const basketLink = (id: bigint) => `${window.location.origin}${window.location.pathname}#/b/${id}`;
@@ -50,11 +50,13 @@ export function readShared(hash = window.location.hash): SharedBasket | undefine
     .slice(0, 5);
   if (!legs.length) return undefined;
   const interval = Number(q.get("every"));
+  const buys = Math.floor(Number(q.get("buys"))); // set by agent-built links; people pick their own otherwise
   return {
     creator: isAddress(from) ? getAddress(from) : zeroAddress,
     legs,
     interval: Number.isFinite(interval) && interval > 0 ? interval : 86400,
     name: (q.get("name") ?? "").slice(0, 64),
     smart: q.get("rebalance") === "1",
+    buys: buys > 0 && buys <= 10_000 ? buys : undefined,
   };
 }

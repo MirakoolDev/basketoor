@@ -4,7 +4,7 @@ import { getWalletClient } from "wagmi/actions";
 import { zeroAddress, type Abi, type Address, type ContractFunctionReturnType, type Hex, type PublicClient } from "viem";
 import { dcacAbi, erc20Abi } from "./abi";
 import { BANKR, bankrAbi } from "./bankr";
-import { createWalletClient, http as httpTransport } from "viem";
+import { createWalletClient, http as httpTransport, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { chain, dep, dataSuffix, isLocal } from "./config";
 import { useNow } from "./ui";
@@ -41,7 +41,12 @@ export type StockInfo = {
   updatedAt: number;
   usable: boolean;
   pricing: "chainlink" | "chainlink-24/7" | "twap" | "bankr"; // twap: its own Aerodrome pool; bankr: an index's basket value
+  /// Shares of the real stock per token. Coinbase stock tokens apply splits and dividends by changing this
+  /// instead of balances (about 1.0005 today), and the price above is per token. 1 for everything else.
+  multiplier: number;
 };
+
+const multiplierAbi = parseAbi(["function multiplier() view returns (uint256)"]);
 
 export type LegView = {
   token: Address;
@@ -93,9 +98,12 @@ export function useStocks() {
       const price = (token: Address) => pc.readContract({ address: dep.dcac, abi: dcacAbi, functionName: "priceOf", args: [token] });
       const listed = await Promise.all(
         dep.stocks.map(async (s) => {
-          const [[p, updatedAt, usable], decimals] = await Promise.all([
+          const [[p, updatedAt, usable], decimals, mult] = await Promise.all([
             price(s.token),
             pc.readContract({ address: s.token, abi: erc20Abi, functionName: "decimals" }),
+            (s.kind ?? "stock") === "stock" && !dep.mock
+              ? pc.readContract({ address: s.token, abi: multiplierAbi, functionName: "multiplier" }).catch(() => 10n ** 18n)
+              : 10n ** 18n,
           ]);
           return {
             symbol: s.symbol,
@@ -107,6 +115,7 @@ export function useStocks() {
             updatedAt: Number(updatedAt),
             usable,
             pricing: s.pricing ?? "chainlink",
+            multiplier: Number(mult) / 1e18,
           } satisfies StockInfo;
         }),
       );
@@ -143,6 +152,7 @@ async function listedIndexes(pc: PublicClient, known: Set<string>): Promise<Stoc
         updatedAt: Number(updatedAt),
         usable,
         pricing: "bankr",
+        multiplier: 1,
       } satisfies StockInfo;
     }),
   );

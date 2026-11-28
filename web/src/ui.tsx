@@ -219,9 +219,10 @@ export function valuePlan(plan: PlanView, stocks: StockInfo[] | undefined) {
   let value = 0;
   const legs = plan.legs.map((l) => {
     const s = stocks?.find((x) => x.token.toLowerCase() === l.token.toLowerCase());
-    const shares = s ? Number(l.received) / 10 ** s.decimals : 0;
+    const tokens = s ? Number(l.received) / 10 ** s.decimals : 0;
+    const shares = tokens * (s?.multiplier ?? 1); // real shares: Coinbase stock tokens carry a split/dividend multiplier
     const spent = Number(l.spent) / 1e6;
-    const legValue = s ? shares * s.price : 0;
+    const legValue = s ? tokens * s.price : 0; // the price is per token
     value += legValue;
     return {
       ...l,
